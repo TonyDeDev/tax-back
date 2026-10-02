@@ -10,6 +10,8 @@ It is a demo tool, not a commercial product and not tax advice.
 - **Demo first:** a visitor can click "Try the demo" and explore a realistic seeded portfolio without connecting a brokerage.
 - **Tax math must be correct:** wrong numbers are worse than no demo.
 - **Canada only** (CRA rules).
+- **Web app first:** a responsive web app that works on desktop and phone browsers.
+  Do not build a native mobile app (Expo, React Native, Flutter) or mobile-only features.
 
 ## Stack
 
