@@ -1,0 +1,140 @@
+# TaxBack
+
+TaxBack is a free, working-concept web app that pulls a user's brokerage accounts through SnapTrade into one Hub and shows Canadian tax insight (ACB, capital gains, superficial losses, tax-loss harvesting, dividends).
+It is a demo tool, not a commercial product and not tax advice.
+
+## Ground Rules
+
+- **$0 to build and run:** only free tiers that need no credit card.
+  Ask before adding any service.
+- **Demo first:** a visitor can click "Try the demo" and explore a realistic seeded portfolio without connecting a brokerage.
+- **Tax math must be correct:** wrong numbers are worse than no demo.
+- **Canada only** (CRA rules).
+
+## Stack
+
+| Layer | Choice |
+| --- | --- |
+| App (frontend + backend) | Next.js (App Router), TypeScript strict |
+| Hosting | Vercel Hobby (free) |
+| Database | Neon Postgres (free) + Drizzle ORM |
+| Auth | Better Auth: GitHub/Google sign-in + one-click demo login |
+| Brokerage data | SnapTrade Build plan (free, 5 connected accounts) |
+| FX rates | Bank of Canada Valet API (free) |
+| UI | Tailwind CSS v4, shadcn/ui, Lucide, Recharts, TanStack Table, next-themes |
+| Validation / money | zod, decimal.js |
+| Tests | Vitest |
+
+No Redis, queues, workers, Docker, or paid services.
+
+## Project Layout
+
+```
+src/
+  app/                 routes (pages, server actions, route handlers)
+  server/              server-only: db, snaptrade, sync, recompute, auth
+  tax-engine/          pure Canadian tax logic + tests
+  components/          UI
+  lib/                 formatting and client-safe helpers
+scripts/seed-demo.ts   demo data generator
+```
+
+## SnapTrade
+
+- The server registers each user (`registerUser`) and gets a `userId` + `userSecret`.
+  `userSecret` is returned only once; store it encrypted (AES-256-GCM, `ENCRYPTION_KEY`).
+- `clientId`, `consumerKey`, and `userSecret` never reach the browser.
+  SnapTrade code lives in `src/server/snaptrade/` and imports `server-only`.
+- Use `snaptrade-typescript-sdk`.
+- **Connect:** server action creates a Connection Portal URL with `customRedirect` to `/connect/callback`, browser redirects there, callback runs a sync.
+- **Reconnect:** same portal URL with the connection id in `reconnect`; show a "Reconnect" button for broken connections.
+- **Data used:** accounts, balances, holdings, and account activities (paginated, max 1000 per page, always fetch all pages).
+- **Sync** runs on connect, on a "Refresh" button (once per 15 min), and once daily via Vercel Cron (`/api/cron/sync`, protected by `CRON_SECRET`).
+  A sync fetches everything, upserts by SnapTrade id (safe to repeat), then recomputes the user's tax data.
+- Free plan allows 5 connected accounts; when full, the Connect button points users to the demo.
+
+## Tax Engine (`src/tax-engine`)
+
+Pure functions: ledger in, tax results out.
+No I/O, no `Date.now()`, and `decimal.js` for all money, quantities, and FX (never `number`).
+Rates live in a per-year config.
+Every rule has Vitest tests from worked examples.
+
+- **ACB** is pooled per security across **all** non-registered accounts at every brokerage.
+  Brokers only see their own accounts, so their book value is not trusted.
+  This is the core feature.
+  Buys add cost + fees; sells remove `totalAcb * soldQty / totalQty`; Return of Capital lowers ACB; splits change quantity only.
+- **Capital gain** = proceeds - ACB of sold - fees.
+  50% inclusion rate.
+  Reported in the year of the settlement date.
+- **Superficial loss:** loss is denied if the same security is bought within 30 days before or after the sale (in any account, including TFSA/RRSP) and still held 30 days after.
+  The denied loss is added to the new shares' ACB, or lost forever if they are in a registered account (warn clearly).
+- **Registered accounts** (TFSA, RRSP, FHSA, RESP, RRIF, LIRA) are excluded from gains and income, but included in superficial loss checks.
+  Users confirm each account's type.
+- **Foreign currency:** convert to CAD at the Bank of Canada rate for the trade date (previous business day if none).
+- **Missing history:** if a position's history is incomplete, ask the user for an opening quantity and ACB.
+- **Dividends:** split into eligible, non-eligible, and foreign.
+
+The browser never calculates tax; it only displays saved results.
+
+## Data Model
+
+`users` (Better Auth), `snaptrade_users`, `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `fx_rates`, and the derived tables `acb_positions`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`.
+
+## Demo Data
+
+`scripts/seed-demo.ts` (`pnpm db:seed`) creates a demo user with 3 brokerages, non-registered + TFSA + RRSP accounts, CAD and USD stocks, the same stock at two brokerages (pooled ACB), a superficial loss caused by a TFSA buy, dividends, and a harvesting opportunity, across 3 tax years.
+The daily cron resets it.
+
+## Pages
+
+- **Landing** (`/`): one-screen pitch, "Try the demo", "Sign in".
+- **Hub** (`/hub`): total value, YTD gains, estimated tax, alerts, accounts grouped by brokerage, investments table (pooled by default, per-account toggle), allocation charts.
+  Detail pages for each account and each security (with ACB breakdown).
+- **Tax Center** (`/tax/[year]`): realized gains (Schedule 3 layout), superficial losses, dividends, harvesting suggestions with the 30-day window, CSV export.
+- **Settings:** theme, connected brokerages, delete my data.
+
+Every page shows a "Concept demo - not tax advice" badge.
+
+## Design
+
+Monochrome with one accent color.
+Follows system theme with a manual toggle.
+Colors are CSS variables in `globals.css`; components use token classes only.
+
+| Token | Dark (charcoal + green) | Light (white + blue) |
+| --- | --- | --- |
+| `--bg` | `#121417` | `#FFFFFF` |
+| `--surface` | `#1A1D21` | `#F6F8FA` |
+| `--border` | `#2E3338` | `#E3E7EB` |
+| `--text` | `#E8EAED` | `#0F172A` |
+| `--text-muted` | `#9AA0A6` | `#5B6573` |
+| `--accent` | `#2ECC71` | `#2563EB` |
+| `--positive` | `#2ECC71` | `#15803D` |
+| `--negative` | `#E5675C` | `#C2410C` |
+
+- Inter font, `tabular-nums` on all numbers, 4px spacing grid.
+- Gains and losses show a `+`/`-` sign and arrow, not just color.
+- Desktop sidebar; bottom nav and stacked cards on phones. No horizontal page scroll.
+- Format money with `Intl.NumberFormat('en-CA', { style: 'currency', currency })`.
+
+## Commands
+
+```
+pnpm dev          start the app
+pnpm db:migrate   apply Drizzle migrations
+pnpm db:seed      create or reset the demo user
+pnpm lint
+pnpm typecheck
+pnpm test
+```
+
+Environment variables (see `.env.example`): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY`, `ENCRYPTION_KEY`, `CRON_SECRET`.
+
+Deploy by pushing to GitHub; Vercel builds automatically.
+
+## Maybe Later
+
+- CSV import from brokerage exports (try TaxBack without a SnapTrade slot).
+- PDF tax report.
+- TFSA / RRSP / FHSA contribution room tracking.
