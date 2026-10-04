@@ -100,25 +100,30 @@ Every page shows a "Concept demo - not tax advice" badge.
 
 ## Design
 
-Monochrome with one accent color.
-Follows system theme with a manual toggle.
-Colors are CSS variables in `globals.css`; components use token classes only.
+`DESIGN.md` is the visual language: near-black console look, 1px hairline borders, one green accent, Red Hat type.
+`theme.css` holds every token (Tailwind v4 `@theme`) and wins on any conflict; `src/app/globals.css` imports it after `tailwindcss`.
 
-| Token | Dark (charcoal + green) | Light (white + blue) |
-| --- | --- | --- |
-| `--bg` | `#121417` | `#FFFFFF` |
-| `--surface` | `#1A1D21` | `#F6F8FA` |
-| `--border` | `#2E3338` | `#E3E7EB` |
-| `--text` | `#E8EAED` | `#0F172A` |
-| `--text-muted` | `#9AA0A6` | `#5B6573` |
-| `--accent` | `#2ECC71` | `#2563EB` |
-| `--positive` | `#2ECC71` | `#15803D` |
-| `--negative` | `#E5675C` | `#C2410C` |
-
-- Inter font, `tabular-nums` on all numbers, 4px spacing grid.
-- Gains and losses show a `+`/`-` sign and arrow, not just color.
-- Desktop sidebar; bottom nav and stacked cards on phones. No horizontal page scroll.
-- Format money with `Intl.NumberFormat('en-CA', { style: 'currency', currency })`.
+- **Theme:** follows the system theme with a manual toggle (next-themes, `.dark` class).
+  Dark is the DESIGN.md palette; light is the white + blue variant defined in `theme.css`.
+- **Tokens:** components use semantic classes only (`bg-background`, `bg-card`, `border-border`, `text-foreground`, `text-muted-foreground`, `bg-primary`, `text-link`, `text-positive`, `text-negative`).
+  Never use raw palette classes like `bg-carbon` or hex values in components.
+  Semantic names follow shadcn/ui, so its components pick up the theme automatically.
+- **Color rules:** `primary` (green in dark) fills the one main CTA per screen.
+  `link` blue is for inline links only, never buttons.
+  No pure white text.
+- **Typography:** Red Hat Display for headings, Red Hat Text for body and UI (default `font-sans`), Red Hat Mono for codes and identifiers (`font-display`, `font-sans`, `font-mono`).
+  Load all three with `next/font/google` as CSS variables `--font-red-hat-display`, `--font-red-hat-text`, `--font-red-hat-mono`.
+  Use the scale `text-caption`, `text-body-sm`, `text-body`, `text-subheading`, `text-heading-sm`, `text-heading`, `text-heading-lg`, `text-display`; each class sets size, line height, and letter spacing.
+  Body sizes track +0.025em and 36px+ tracks -0.025em; never flatten both to normal.
+  App screens use `text-heading` and smaller; `text-heading-lg` and `text-display` are for the landing page.
+- **Numbers:** `tabular-nums` on all numbers; if Red Hat Text lacks tabular figures, use Red Hat Mono for numeric columns.
+  Gains and losses show a `+`/`-` sign and arrow, not just color.
+  Format money with `Intl.NumberFormat('en-CA', { style: 'currency', currency })`.
+- **Shape:** radius 2px (`rounded-sm`: tags, nav, icons) or 6px (`rounded-md`: buttons, cards, inputs), never larger.
+  No drop shadows; elevation comes from surface steps, hairline borders, and `shadow-subtle`.
+- **Spacing:** Tailwind's default 4px grid.
+- **Layout (provisional, still being designed):** current direction is a desktop sidebar with bottom nav and stacked cards on phones.
+  Whatever the layout, it works on phone and desktop with no horizontal page scroll.
 
 ## Commands
 

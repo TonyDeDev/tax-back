@@ -1,0 +1,149 @@
+/*
+ * TaxBack theme tokens (Tailwind CSS v4).
+ * Visual language: DESIGN.md. This file is the source of truth for values.
+ * Import after `@import "tailwindcss";` in src/app/globals.css.
+ * Dark mode is the `.dark` class set by next-themes.
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  /* Palette (DESIGN.md). Components use the semantic colors below, not these. */
+  --color-signal-green: #71d083;
+  --color-led-green: #366740;
+  --color-moss-border: #2d5736;
+  --color-forest-wash: #1d3a24;
+  --color-fern-ground: #1b2a1e;
+  --color-link-blue: #70b8ff;
+  --color-lilac-accent: #baa7ff;
+  --color-plum-edge: #291f43;
+  --color-iris-border: #473876;
+  --color-lavender-mist: #e2ddfe;
+  --color-carbon: #04040b;
+  --color-graphite: #121113;
+  --color-obsidian: #1a191b;
+  --color-slate: #232225;
+  --color-basalt: #2b292d;
+  --color-iron: #323035;
+  --color-pewter: #3c393f;
+  --color-steel: #49474e;
+  --color-fog: #7c7a85;
+  --color-silver: #b5b2bc;
+  --color-ash: #eeeef0;
+  --color-chalk: #e5e5e5;
+
+  /* Font families. The --font-red-hat-* variables come from next/font/google. */
+  --font-sans: var(--font-red-hat-text), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-display: var(--font-red-hat-display), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-red-hat-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  /* Type scale. Body sizes track open (+0.025em), display sizes track tight (-0.025em). */
+  --text-caption: 12px;
+  --text-caption--line-height: 1.5;
+  --text-caption--letter-spacing: 0.025em;
+  --text-body-sm: 14px;
+  --text-body-sm--line-height: 1.43;
+  --text-body-sm--letter-spacing: 0.025em;
+  --text-body: 16px;
+  --text-body--line-height: 1.5;
+  --text-body--letter-spacing: 0.025em;
+  --text-subheading: 18px;
+  --text-subheading--line-height: 1.56;
+  --text-subheading--letter-spacing: 0.025em;
+  --text-heading-sm: 20px;
+  --text-heading-sm--line-height: 1.4;
+  --text-heading-sm--letter-spacing: 0.025em;
+  --text-heading: 36px;
+  --text-heading--line-height: 1.11;
+  --text-heading--letter-spacing: -0.025em;
+  --text-heading-lg: 48px;
+  --text-heading-lg--line-height: 1.11;
+  --text-heading-lg--letter-spacing: -0.025em;
+  --text-display: 60px;
+  --text-display--line-height: 1;
+  --text-display--letter-spacing: -0.025em;
+
+  /* Spacing: Tailwind's default 4px grid (--spacing: 0.25rem). Do not add --spacing-* keys. */
+
+  /* Radius: 2px for tags, nav and icons; 6px for buttons, cards and inputs; never larger. */
+  --radius-sm: 2px;
+  --radius-md: 6px;
+  --radius-lg: 6px;
+  --radius-xl: 6px;
+
+  /* Elevation: no drop shadows, only the inset top highlight. */
+  --shadow-subtle: rgba(255, 255, 255, 0.06) 0px 1px 0px 0px inset;
+}
+
+/* Semantic colors (shadcn/ui names + TaxBack extras). Light is the default. */
+:root {
+  --background: #ffffff;
+  --foreground: #0f172a;
+  --card: #f6f8fa;
+  --card-foreground: #0f172a;
+  --popover: #f6f8fa;
+  --popover-foreground: #0f172a;
+  --muted: #eef1f4;
+  --muted-foreground: #5b6573;
+  --secondary: #eef1f4;
+  --secondary-foreground: #0f172a;
+  --accent: #eef1f4;
+  --accent-foreground: #0f172a;
+  --primary: #2563eb;
+  --primary-foreground: #ffffff;
+  --border: #e3e7eb;
+  --input: #e3e7eb;
+  --ring: #93b4f5;
+  --link: #2563eb;
+  --positive: #15803d;
+  --negative: #c2410c;
+  --destructive: #c2410c;
+}
+
+.dark {
+  --background: #04040b;
+  --foreground: #eeeef0;
+  --card: #121113;
+  --card-foreground: #eeeef0;
+  --popover: #121113;
+  --popover-foreground: #eeeef0;
+  --muted: #1a191b;
+  --muted-foreground: #7c7a85;
+  --secondary: #1a191b;
+  --secondary-foreground: #eeeef0;
+  --accent: #232225;
+  --accent-foreground: #eeeef0;
+  --primary: #71d083;
+  --primary-foreground: #04040b;
+  --border: #2b292d;
+  --input: #232225;
+  --ring: #2d5736;
+  --link: #70b8ff;
+  --positive: #71d083;
+  --negative: #e5675c;
+  --destructive: #e5675c;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-link: var(--link);
+  --color-positive: var(--positive);
+  --color-negative: var(--negative);
+  --color-destructive: var(--destructive);
+}
