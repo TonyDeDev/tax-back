@@ -6,6 +6,6 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}", "scripts/**/*.test.ts"],
-    coverage: { provider: "v8", include: ["src/tax-engine/**"] },
+    coverage: { provider: "v8", include: ["src/tax-engine/**"], exclude: ["**/*.test.ts", "**/test-helpers.ts", "**/types.ts"] },
   },
 });
