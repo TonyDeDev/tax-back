@@ -18,6 +18,8 @@
     "@neondatabase/serverless": "^1.2.0",
     "@tanstack/react-table": "^9.2.4",
     "better-auth": "^1.7.7",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "decimal.js": "^10.6.0",
     "drizzle-orm": "^0.45.3",
     "lucide-react": "^1.51.0",
@@ -28,6 +30,7 @@
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
     "snaptrade-typescript-sdk": "^12.2.16",
+    "tailwind-merge": "^3.7.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

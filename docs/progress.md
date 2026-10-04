@@ -24,6 +24,14 @@ The full plan is in the Claude plan file, and scope rules are in `CLAUDE.md`.
 - Missing-history warnings and opening-balance overrides.
 - 35 passing tests, about 93% line coverage.
 
+### Phase 1 (partial) - UI scaffolding
+
+- Red Hat fonts, `theme.css` tokens, and next-themes (system default, manual toggle).
+- App shell: sidebar on desktop, top bar and bottom nav on phones.
+- Shared components: Button, Card, Badge, Money, PageHeader, StatCard, EmptyState, DemoBadge.
+- Placeholder pages for landing, sign-in, Hub, account detail, security detail, Tax Center, and Settings.
+- Checked in dark and light at desktop and 390px width with no horizontal scroll.
+
 ### Docs
 
 - `docs/dev.md`: developer quick start.
@@ -31,7 +39,7 @@ The full plan is in the Claude plan file, and scope rules are in `CLAUDE.md`.
 
 ## Not started
 
-- Phase 1: design system and app shell.
+- Phase 1 remainder: data table, alert banner, and a styleguide route.
 - Phase 3: database schema and queries.
 - Phase 4: auth.
 - Phase 5: demo seed and recompute pipeline.
