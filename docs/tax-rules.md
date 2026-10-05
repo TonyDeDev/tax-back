@@ -11,6 +11,10 @@ This is a concept demo and not tax advice.
 - Sells remove `totalAcb * soldQty / totalQty`.
 - Return of capital lowers ACB, and any excess over ACB is an immediate capital gain.
 - Splits change quantity only.
+- A split is one corporate action even though every account holding the security reports it, so the
+  ratio is applied once per event rather than once per account.
+- Standalone account fees do not change ACB; they are carrying charges, not costs of a trade.
+  Trade commissions arrive on the buy or sell itself.
 
 ## Capital Gains
 
@@ -25,6 +29,10 @@ This is a concept demo and not tax advice.
 - Denied share is min(sold, bought in window, held at end of window) divided by sold.
 - Denied loss moves to the replacement shares' ACB, or is lost forever when they are in a registered account.
 - One purchase can shelter only one loss.
+- The denied loss follows the shares still owned when the window closes, so purchases made after the
+  sale absorb it before any pre-sale purchase that this disposition may itself have sold.
+- A sale whose window has not closed yet is reported with `status: "pending"`: the outcome still
+  depends on what the user does next. It becomes `final` once the window end has passed.
 
 ## Dividends
 
@@ -38,3 +46,9 @@ This is a concept demo and not tax advice.
 - Spouse and affiliated-person purchases are not considered for superficial losses.
 - Provincial credits are not modelled.
 - Rates are verified for 2019 to 2026 only, and other years raise a warning.
+- Quantities are pooled, not tracked per account, so a split is recognised by matching security,
+  ratio, and a settlement date within 7 days. Two brokers reporting one split more than 7 days apart
+  would be counted twice; reports on different dates inside the tolerance raise
+  `split_reported_twice`.
+- A denied loss is apportioned across in-window purchases without lot tracking, so which specific
+  replacement shares carry it is an approximation. The total denied is unaffected.

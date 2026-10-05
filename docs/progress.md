@@ -22,7 +22,23 @@ The full plan is in the Claude plan file, and scope rules are in `CLAUDE.md`.
 - Dividends split into eligible, non-eligible, and foreign.
 - Harvesting opportunities with safe-sale and no-rebuy dates.
 - Missing-history warnings and opening-balance overrides.
-- 35 passing tests, about 93% line coverage.
+- 46 passing tests, about 98% line coverage.
+
+### Phase 2a - Tax engine correctness pass
+
+Four defects found by reading the engine, each reproduced as a failing test before being fixed:
+
+- A denied superficial loss was allocated to in-window purchases in ledger order, so a pre-sale
+  purchase consumed it first. When the sale emptied the pool the amount was reported
+  `lost_forever` even though a non-registered replacement existed, understating that position's
+  ACB. Allocation now prefers post-sale replacements, which are the shares actually still held.
+- A split reported by two accounts was applied once per report to the pooled quantity and to the
+  cross-account held timeline, so a 2-for-1 held at two brokerages gave 4x. Splits are now deduped
+  per event, scoped to non-registered accounts for the pool and to all accounts for the timeline.
+- Superficial losses inside the last 30 days were reported as settled, because the still-held test
+  read current holdings as holdings at a future date. `SuperficialLoss.status` is now
+  `pending` until the window closes, with a `superficial_loss_pending` warning.
+- `fee` entries fell through the switch unhandled; the case is now explicit and documented.
 
 ### Phase 1 (partial) - UI scaffolding
 
@@ -52,3 +68,7 @@ The full plan is in the Claude plan file, and scope rules are in `CLAUDE.md`.
 - Verify the 2019-2026 dividend rates against CRA.
 - Raise engine coverage to 100%.
 - Add the SnapTrade keys to `.env.local` by hand.
+- `package.json` pins `@types/node@^20` while vitest 5 wants `^22 || >=24`. pnpm tolerates the
+  mismatch; npm refuses to resolve it without `--legacy-peer-deps`. Worth aligning.
+- Surface `superficial_loss_pending` in the Hub alerts so an open 30-day window is visible while the
+  user can still act on it.

@@ -109,6 +109,11 @@ export interface SuperficialLoss {
   symbol: string;
   saleDate: string;
   year: number;
+  /**
+   * `pending` while `windowEnd` is still in the future: the outcome depends on what the user does
+   * next, so the denial is provisional. Selling the replacement before the window closes undoes it.
+   */
+  status: "final" | "pending";
   quantitySold: Dec;
   quantityDenied: Dec;
   totalLossCad: Dec;
@@ -161,8 +166,18 @@ export interface HarvestOpportunity {
 export type Warning =
   | { type: "opening_balance_needed"; securityId: string; symbol: string; entryId: string; shortfall: Dec }
   | { type: "superficial_loss_lost_forever"; securityId: string; symbol: string; entryId: string; amountCad: Dec }
+  | {
+      type: "superficial_loss_pending";
+      securityId: string;
+      symbol: string;
+      entryId: string;
+      /** The denial is only settled once this date has passed. */
+      windowEnd: string;
+    }
   | { type: "unsupported_transfer"; securityId: string; symbol: string; entryId: string }
   | { type: "roc_without_position"; securityId: string; symbol: string; entryId: string }
+  /** The same split was reported by more than one account on different dates; it was applied once. */
+  | { type: "split_reported_twice"; securityId: string; symbol: string; entryId: string }
   | { type: "assumed_year_config"; year: number };
 
 export interface YearSummary {

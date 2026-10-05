@@ -1,5 +1,45 @@
-import { isIsoDate } from "./dates";
+import { addDays, isIsoDate } from "./dates";
 import type { EntryKind, LedgerEntry } from "./types";
+
+/** How far apart two reports of the same split may sit before they count as separate events. */
+const SPLIT_REPORT_TOLERANCE_DAYS = 7;
+
+export interface SplitDedupe {
+  /** Split entries that repeat an already-applied split and must be skipped. */
+  duplicateIds: ReadonlySet<string>;
+  /** Duplicates that arrived on a different date than the split they repeat, worth surfacing. */
+  conflicts: { securityId: string; symbol: string; entryId: string }[];
+}
+
+/**
+ * A split is one corporate action, but every account holding the security reports it. Both the ACB
+ * pool and the cross-account held timeline are totals, so the ratio must be applied once per split
+ * rather than once per account, or a 2-for-1 held at two brokerages quadruples the quantity.
+ *
+ * Two entries are the same split when they share a security and ratio and sit within
+ * `SPLIT_REPORT_TOLERANCE_DAYS` of each other, which absorbs brokers disagreeing on the date.
+ * Expects a ledger already ordered by `sortLedger`.
+ */
+export function dedupeSplits(sorted: readonly LedgerEntry[]): SplitDedupe {
+  const duplicateIds = new Set<string>();
+  const conflicts: SplitDedupe["conflicts"] = [];
+  const applied = new Map<string, { date: string }>();
+
+  for (const e of sorted) {
+    if (e.kind !== "split" || !e.splitRatio) continue;
+    const key = `${e.securityId}|${e.splitRatio.toString()}`;
+    const previous = applied.get(key);
+    if (previous && e.settlementDate <= addDays(previous.date, SPLIT_REPORT_TOLERANCE_DAYS)) {
+      duplicateIds.add(e.id);
+      if (e.settlementDate !== previous.date) {
+        conflicts.push({ securityId: e.securityId, symbol: e.symbol, entryId: e.id });
+      }
+      continue;
+    }
+    applied.set(key, { date: e.settlementDate });
+  }
+  return { duplicateIds, conflicts };
+}
 
 /** Same-day order: opening, splits, acquisitions, other income, then dispositions. */
 const KIND_ORDER: Record<EntryKind, number> = {

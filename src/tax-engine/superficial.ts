@@ -1,5 +1,6 @@
 import { addDays } from "./dates";
 import { D, ZERO, type Dec } from "./decimal";
+import { dedupeSplits } from "./ledger";
 import type { LedgerEntry } from "./types";
 
 /** Window is inclusive: 30 days before the sale through 30 days after it, on settlement dates. */
@@ -18,6 +19,8 @@ interface Point {
 export function buildHeldTimeline(sorted: readonly LedgerEntry[]): HeldTimeline {
   const totals = new Map<string, Dec>();
   const points = new Map<string, Point[]>();
+  // These totals span every account, so a split reported by each of them must only count once.
+  const { duplicateIds } = dedupeSplits(sorted);
   for (const e of sorted) {
     const current = totals.get(e.securityId) ?? ZERO;
     let next: Dec;
@@ -33,6 +36,7 @@ export function buildHeldTimeline(sorted: readonly LedgerEntry[]): HeldTimeline 
         next = current.minus(e.quantity);
         break;
       case "split":
+        if (duplicateIds.has(e.id)) continue;
         next = current.times(e.splitRatio ?? 1);
         break;
       default:
@@ -86,12 +90,13 @@ export interface SuperficialAssessment {
  */
 export function assessSuperficialLoss(args: {
   sale: LedgerEntry;
+  saleIndex: number;
   lossCad: Dec;
   acquisitions: readonly Acquisition[];
   remaining: Map<string, Dec>;
   held: HeldTimeline;
 }): SuperficialAssessment | null {
-  const { sale, lossCad, acquisitions, remaining, held } = args;
+  const { sale, saleIndex, lossCad, acquisitions, remaining, held } = args;
   const windowStart = addDays(sale.settlementDate, -SUPERFICIAL_WINDOW_DAYS);
   const windowEnd = addDays(sale.settlementDate, SUPERFICIAL_WINDOW_DAYS);
 
@@ -109,7 +114,16 @@ export function assessSuperficialLoss(args: {
   const deniedLossCad = lossCad.times(denied).div(sale.quantity);
   const allocations: SuperficialAllocation[] = [];
   let left = denied;
-  for (const a of candidates) {
+
+  // Deliberately not chronological. The denied loss has to follow the shares still owned at the end
+  // of the window, which are the ones bought after the sale; a pre-sale purchase inside the window
+  // may well have been sold off by this very disposition. Consuming those first would strand the
+  // denial on shares that no longer exist and report it as lost forever.
+  const ordered = [...candidates].sort(
+    (a, b) => Number(a.index < saleIndex) - Number(b.index < saleIndex) || a.index - b.index,
+  );
+
+  for (const a of ordered) {
     if (!left.gt(0)) break;
     const free = freeQty(a);
     if (!free.gt(0)) continue;

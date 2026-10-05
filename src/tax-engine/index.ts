@@ -26,7 +26,7 @@ export function computeTax(input: ComputeTaxInput): TaxResult {
   if (errors.length > 0) throw new Error(`Invalid ledger:\n${errors.join("\n")}`);
 
   const sorted = sortLedger([...dropSupersededEntries(input.ledger, openings), ...openingEntries(openings)]);
-  const run = runLedger(sorted, input.fx, yearConfig);
+  const run = runLedger(sorted, input.fx, yearConfig, input.asOfDate);
   const years = summarizeYears(run.gains, run.income, yearConfig, input.marginalRate);
 
   const warnings: Warning[] = [...run.warnings];

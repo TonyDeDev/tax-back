@@ -78,6 +78,18 @@ describe("pooled ACB", () => {
     expect(r.positions[0]!.quantity.toString()).toBe("100");
   });
 
+  it("applies a split once when two brokerages each report it", () => {
+    // 100 at each brokerage is a 200-share pool. One 2-for-1 makes it 400, not 800.
+    const r = run([
+      entry({ kind: "buy", date: "2025-01-02", qty: 100, price: 10, account: "broker-a" }),
+      entry({ kind: "buy", date: "2025-01-02", qty: 100, price: 10, account: "broker-b" }),
+      entry({ kind: "split", date: "2025-02-01", ratio: 2, account: "broker-a" }),
+      entry({ kind: "split", date: "2025-02-01", ratio: 2, account: "broker-b" }),
+    ]);
+    expect(r.positions[0]!.quantity.toString()).toBe("400");
+    expect(r.positions[0]!.totalAcbCad.toFixed(2)).toBe("2000.00");
+  });
+
   it("converts USD trades at each trade-date rate", () => {
     const fx = (c: string, date: string) => (c === "CAD" ? d(1) : date === "2025-01-02" ? d("1.30") : d("1.40"));
     const r = run(

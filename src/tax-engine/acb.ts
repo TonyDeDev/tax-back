@@ -2,6 +2,7 @@ import type { YearConfig } from "./config/rates";
 import { yearOf } from "./dates";
 import { D, ZERO, type Dec } from "./decimal";
 import { incomeFromDividend } from "./dividends";
+import { dedupeSplits } from "./ledger";
 import { isRegistered } from "./registered";
 import { assessSuperficialLoss, buildHeldTimeline, type Acquisition } from "./superficial";
 import type {
@@ -38,8 +39,12 @@ export function runLedger(
   sorted: readonly LedgerEntry[],
   fx: FxLookup,
   configFor: (year: number) => YearConfig,
+  asOfDate: string,
 ): LedgerRun {
   const held = buildHeldTimeline(sorted);
+  // Scoped to the accounts the pool actually tracks: a registered account reporting the split first
+  // must not make the non-registered report look like the duplicate.
+  const splits = dedupeSplits(sorted.filter((e) => !isRegistered(e.accountType)));
   const acquisitionsBySecurity = new Map<string, Acquisition[]>();
   sorted.forEach((entry, index) => {
     if (entry.kind !== "buy" && entry.kind !== "drip") return;
@@ -120,6 +125,8 @@ export function runLedger(
       }
 
       case "split": {
+        // The pool spans every non-registered account, so only the first report of a split applies.
+        if (splits.duplicateIds.has(entry.id)) break;
         if (registered) break;
         const pool = pools.get(entry.securityId);
         if (!pool) break;
@@ -176,6 +183,11 @@ export function runLedger(
         break;
       }
 
+      // Account carrying charges are not deductible against capital gains, so a standalone fee
+      // never touches the pool. Trade commissions arrive on the buy or sell entry instead.
+      case "fee":
+        break;
+
       case "transfer_in":
       case "transfer_out":
         run.warnings.push({
@@ -215,6 +227,7 @@ export function runLedger(
           const lossCad = gain.neg();
           const assessment = assessSuperficialLoss({
             sale: entry,
+            saleIndex: index,
             lossCad,
             acquisitions: acquisitionsBySecurity.get(entry.securityId) ?? [],
             remaining,
@@ -257,12 +270,25 @@ export function runLedger(
                 amountCad: lostForever,
               });
             }
+            // The still-held test looks at the end of the window. While that is in the future the
+            // answer rests on what the user does next, so the denial is provisional, not settled.
+            const pending = assessment.windowEnd > asOfDate;
+            if (pending) {
+              run.warnings.push({
+                type: "superficial_loss_pending",
+                securityId: entry.securityId,
+                symbol: entry.symbol,
+                entryId: entry.id,
+                windowEnd: assessment.windowEnd,
+              });
+            }
             run.superficialLosses.push({
               saleEntryId: entry.id,
               securityId: entry.securityId,
               symbol: entry.symbol,
               saleDate: entry.settlementDate,
               year: yearOf(entry.settlementDate),
+              status: pending ? "pending" : "final",
               quantitySold: entry.quantity,
               quantityDenied: assessment.quantityDenied,
               totalLossCad: lossCad,
@@ -300,6 +326,10 @@ export function runLedger(
         break;
     }
   });
+
+  for (const conflict of splits.conflicts) {
+    run.warnings.push({ type: "split_reported_twice", ...conflict });
+  }
 
   for (const [securityId, pool] of pools) {
     if (!pool.quantity.gt(0)) continue;
