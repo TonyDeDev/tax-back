@@ -16,8 +16,8 @@ const OPENING_PREFIX = "opening:";
 
 const dec = (value: string | null | undefined): Dec | undefined =>
   value === null || value === undefined ? undefined : new D(value);
-const moneyText = (value: Dec): string => value.toFixed(6);
-const quantityText = (value: Dec): string => value.toFixed(10);
+export const moneyText = (value: Dec): string => value.toFixed(6);
+export const quantityText = (value: Dec): string => value.toFixed(10);
 
 function lookup<T>(map: ReadonlyMap<string, T>, key: string, what: string): T {
   const value = map.get(key);

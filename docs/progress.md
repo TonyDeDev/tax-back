@@ -94,6 +94,22 @@ Fixed:
 
 Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): per-user upsert keys, stale sync lock recovery, security natural-key collisions, serialized refresh-token rotation, and decimal parsing at the SnapTrade boundary.
 
+### Phase 8 - SnapTrade sync (2026-10-06)
+
+- `src/server/snaptrade/`: Bearer-token client with zod-validated responses and full activity paging, token handling that refreshes once on a 401 and then asks the user to reconnect, and a pure mapper from SnapTrade to ledger rows.
+- Endpoint paths checked against live OAuth responses with `pnpm snaptrade:probe`: `/positions` and `/holdings` answer 410, `/positions/all` replaces them.
+- `src/server/fx/boc.ts`: Bank of Canada Valet rates, fetching only the missing range.
+- `src/server/recompute.ts`: ledger to `computeTax` to the derived tables, for one user.
+- `src/server/sync/sync.ts`: stale lock recovery, one running sync per user, the 15-minute Refresh cooldown, upserts on the per-user SnapTrade keys, adopting demo-only securities, and failures stored with a user-safe message.
+- Triggers: first sync after the grant (Hub and Settings), the Refresh button, and the daily cron (`/api/cron/sync`, which also deletes expired sessions).
+- Tested on PGlite with SnapTrade and the Bank of Canada stubbed, and run once against a real Wealthsimple connection.
+
+### Phase 6 (partial) - Hub with real data
+
+- Total value in CAD, YTD realized gains, estimated tax, and alerts from the derived tables.
+- Accounts grouped by brokerage, with a type picker so the user confirms each account's type (which recomputes).
+- Banner for a failed sync, with "Connect with SnapTrade" when the grant expired.
+
 ### Docs
 
 - `docs/dev.md`: developer quick start.
@@ -105,9 +121,9 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 
 - Phase 1 remainder: data table, alert banner, and a styleguide route.
 - Phase 3 remainder: page read queries.
-- Phase 5: demo seed and recompute pipeline (the demo user exists with id `demo` but has no data yet).
-- Phases 6 and 7: Hub, Tax Center, Settings, landing page.
-- Phase 8: SnapTrade sync over the OAuth Bearer token (`src/server/snaptrade/`, `fetch` + zod).
+- Phase 5: demo seed and its daily reset in the cron (the demo user exists with id `demo` but has no data yet; `recomputeUser` is ready for it).
+- Phase 6 remainder: investments table, allocation charts, account and security detail pages.
+- Phase 7: Tax Center, Settings (marginal rate, delete my data), landing page.
 - Phases 9 and 10: quality pass and deploy.
 
 ## Open items
@@ -121,4 +137,6 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
   mismatch; npm refuses to resolve it without `--legacy-peer-deps`. Worth aligning.
 - Surface `superficial_loss_pending` in the Hub alerts so an open 30-day window is visible while the
   user can still act on it.
-- The daily cron should delete expired sessions for every user (demo sign-in already purges the demo's).
+- Per-transaction overrides (dividend class, return of capital), since SnapTrade cannot tell them apart.
+- Flag positions whose holdings exceed the known history even without a sale, and prompt for an opening balance.
+- Re-check the Hub at 390px width in a real phone-sized viewport (the automated browser could not narrow below desktop width).

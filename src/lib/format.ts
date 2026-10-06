@@ -42,3 +42,14 @@ export function directionOf(value: NumericInput): Direction {
   const n = toNumber(value);
   return n > 0 ? "gain" : n < 0 ? "loss" : "flat";
 }
+
+/** "just now", "5 min ago", "3 h ago", "2 days ago". `now` is passed in so server and tests agree. */
+export function formatAgo(when: Date, now: Date): string {
+  const minutes = Math.floor((now.getTime() - when.getTime()) / 60_000);
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days} ${days === 1 ? "day" : "days"} ago`;
+}

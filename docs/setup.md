@@ -15,7 +15,7 @@ All variables live in `.env.local` locally and in the Vercel project settings in
 | `BETTER_AUTH_URL` | Yes | The public origin: `http://localhost:3000` locally, `https://<project>.vercel.app` in production. |
 | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | No | Google sign-in. Set both or neither. |
 | `SNAPTRADE_OAUTH_CLIENT_ID`, `SNAPTRADE_OAUTH_CLIENT_SECRET` | No | The SnapTrade OAuth app: sign-in and brokerage access. Set both or neither. Without it nobody can connect brokerages. |
-| `CRON_SECRET` | No | At least 32 characters. Protects `/api/cron/sync`. |
+| `CRON_SECRET` | No | At least 32 characters. Protects `/api/cron/sync`; without it the daily sync is refused. |
 | `DEMO_USER_EMAIL` | No | Defaults to `demo@taxback.invalid`. Keep the `.invalid` domain so no provider can verify it. |
 
 Empty values count as unset.
@@ -66,6 +66,19 @@ See SnapTrade's guide: https://docs.snaptrade.com/docs/oauth-apps.
    Approve the consent screen; you land on `/hub` signed in.
 3. Or sign in with Google, open Settings, and choose "Connect with SnapTrade".
    Approve the consent screen; you come back to Settings with "SnapTrade is connected".
+
+## Brokerage Sync
+
+- A sync reads every investment account (`/accounts`, `/accounts/{id}/positions/all`, `/balances`, and every page of `/activities`), upserts it by SnapTrade id, fills Bank of Canada FX rates, and recomputes the tax tables.
+  The old `/positions` and `/holdings` endpoints answer 410 for OAuth apps.
+- It runs right after SnapTrade access is granted (the Hub or Settings shows "Reading your brokerages"), from the Hub's Refresh button (once per 15 minutes), and daily from Vercel Cron.
+- The daily cron calls `GET /api/cron/sync` at 09:00 UTC (`vercel.json`).
+  Set `CRON_SECRET` in the Vercel project; Vercel sends it as `Authorization: Bearer <CRON_SECRET>`, and the route answers 401 without it.
+  Locally: `curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/sync`.
+- When a sync fails, the Hub shows why and keeps the last good numbers.
+  An expired or revoked grant shows "Connect with SnapTrade" to grant access again.
+- `pnpm snaptrade:probe` lists users with a SnapTrade grant; `pnpm snaptrade:probe <userId>` saves that user's raw SnapTrade responses to `.snaptrade-probe/` (gitignored) for checking response shapes.
+  The files are real brokerage data: delete them when done and never commit or share them.
 
 ## How Sign-In Works
 

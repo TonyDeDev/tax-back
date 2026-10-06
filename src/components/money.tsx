@@ -1,4 +1,4 @@
-import { ArrowDownRight, ArrowUpRight, Minus } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight } from "lucide-react";
 import { directionOf, formatMoney, type NumericInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -15,7 +15,9 @@ export function Money({ value, currency = "CAD", signed = false, className }: Mo
   if (!signed) return <span className={cn("tabular-nums", className)}>{text}</span>;
 
   const direction = directionOf(value);
-  const Icon = direction === "gain" ? ArrowUpRight : direction === "loss" ? ArrowDownRight : Minus;
+  // Zero has no sign, so it gets no arrow either: a dash-like icon would read as a negative amount.
+  if (direction === "flat") return <span className={cn("tabular-nums", className)}>{text}</span>;
+  const Icon = direction === "gain" ? ArrowUpRight : ArrowDownRight;
   return (
     <span
       className={cn(

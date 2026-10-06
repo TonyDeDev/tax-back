@@ -40,3 +40,6 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# SnapTrade probe output (real brokerage data)
+/.snaptrade-probe/

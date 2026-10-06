@@ -2,24 +2,33 @@ import type { Metadata } from "next";
 import { CheckCircle2, ExternalLink, Link2 } from "lucide-react";
 import { ConnectSnapTradeButton } from "@/components/auth/connect-snaptrade-button";
 import { EmptyState } from "@/components/empty-state";
+import { FirstSync } from "@/components/sync/first-sync";
 import { PageHeader } from "@/components/page-header";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatAgo } from "@/lib/format";
 import { hasSnapTradeGrant } from "@/server/auth/accounts";
 import { configuredProviders } from "@/server/auth/config";
 import { requireUser } from "@/server/auth/session";
 import { SNAPTRADE_DASHBOARD_URL } from "@/server/auth/snaptrade-provider";
 import { getDb } from "@/server/db";
 import { getEnv } from "@/server/env";
+import { getLastSuccessfulSyncAt, getLastSync } from "@/server/queries/hub";
 
 export const metadata: Metadata = { title: "Settings" };
+// "Connect with SnapTrade" returns here, and the first sync runs as a server action on this page.
+export const maxDuration = 300;
 
 /** Better Auth sends `?error=<code>` back here when "Connect with SnapTrade" fails. */
 function connectError(code: string | undefined): string | null {
   if (!code) return null;
   if (code === "access_denied") return "SnapTrade access was not granted, so nothing was connected.";
   if (code === "account_ownership_conflict") return "That SnapTrade account is already connected to a different TaxBack account.";
+  // The 5-minute state cookie expired, or SnapTrade returned to a different host (localhost vs 127.0.0.1).
+  if (code === "state_mismatch" || code === "state_security_mismatch") {
+    return "The connection timed out or came back to a different address. Click Connect with SnapTrade again and finish within 5 minutes.";
+  }
   return "SnapTrade could not be connected. Try again.";
 }
 
@@ -43,6 +52,10 @@ export default async function Settings(props: PageProps<"/settings">) {
   const connected = !user.isDemo && (await hasSnapTradeGrant(getDb(), user.id));
   const error = connectError(first(params.error));
   const justConnected = connected && first(params.connected) === "snaptrade";
+  const db = getDb();
+  const [lastSync, lastSuccessAt] = connected
+    ? await Promise.all([getLastSync(db, user.id), getLastSuccessfulSyncAt(db, user.id)])
+    : [null, null];
 
   return (
     <>
@@ -86,12 +99,17 @@ export default async function Settings(props: PageProps<"/settings">) {
               description="The demo uses sample data. Sign in to connect your own brokerages."
             />
           ) : connected ? (
-            <EmptyState
-              icon={Link2}
-              title="SnapTrade connected"
-              description="Brokerages you share in SnapTrade show up in the Hub after a refresh."
-              action={manageInSnapTrade}
-            />
+            <>
+              {!lastSync && <FirstSync />}
+              <EmptyState
+                icon={Link2}
+                title="SnapTrade connected"
+                description={`Brokerages you share in SnapTrade show up in the Hub after a refresh. ${
+                  lastSuccessAt ? `Last synced ${formatAgo(lastSuccessAt, new Date())}.` : "Not synced yet."
+                }`}
+                action={manageInSnapTrade}
+              />
+            </>
           ) : (
             <EmptyState
               icon={Link2}
