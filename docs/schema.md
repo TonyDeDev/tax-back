@@ -8,6 +8,7 @@ Migrations are generated into `drizzle/` with `pnpm db:generate` and applied wit
 
 - One tenant is one user.
   Every user-owned row carries `user_id`, and children reference their parent through `(id, user_id)` composite keys, so a row can never point at another user's data.
+  This includes the derived tables: each one references its transaction, account, loss, or manual adjustment by `(id, user_id)`, so a recompute bug cannot attach one user's result to another user's ledger.
 - The database is reached only from server code, so there is no row-level security; every query helper takes `userId` first.
 - Money is `numeric(20,6)`, quantities `numeric(28,10)`, FX rates and split ratios `numeric(20,10)`, tax rates `numeric(6,5)`.
   Drizzle returns them as strings, which go straight into decimal.js.
@@ -21,8 +22,8 @@ Migrations are generated into `drizzle/` with `pnpm db:generate` and applied wit
 
 | Group | Tables |
 | --- | --- |
-| Auth (Better Auth) | `users`, `sessions`, `accounts` (OAuth links), `verifications` |
-| Profile | `user_profiles` (demo flag, marginal rate, last sync), `snaptrade_users` (encrypted `userSecret`) |
+| Auth (Better Auth) | `users`, `sessions`, `accounts` (Google and SnapTrade OAuth grants, tokens encrypted), `verifications`, `rate_limits` |
+| Profile | `user_profiles` (demo flag, marginal rate, last sync) |
 | Brokerage data | `connections`, `brokerage_accounts`, `securities` (global), `transactions`, `holdings`, `account_balances` |
 | User input | `manual_adjustments` (opening quantity and ACB) |
 | Reference | `fx_rates` (Bank of Canada, global) |
@@ -32,7 +33,7 @@ Migrations are generated into `drizzle/` with `pnpm db:generate` and applied wit
 ```mermaid
 erDiagram
   users ||--|| user_profiles : has
-  users ||--o| snaptrade_users : registers
+  users ||--o{ accounts : "Google and SnapTrade grants"
   users ||--o{ connections : owns
   connections ||--o{ brokerage_accounts : contains
   brokerage_accounts ||--o{ transactions : records
@@ -67,12 +68,35 @@ erDiagram
 - A partial unique index allows only one demo user.
 - `users.email` must be lowercase, which makes its unique constraint case-insensitive.
 - The app uses the WebSocket `Pool` driver (`drizzle-orm/neon-serverless`), not `neon-http`, because recompute needs an interactive transaction.
+- The demo user always has the id `demo` and the email `demo@taxback.invalid`; `.invalid` is a reserved TLD, so no OAuth provider can verify that address and claim the account.
+- `rate_limits` backs Better Auth's rate limiter, because serverless instances share no memory.
+
+## Rules for Writers
+
+These hold for code not yet written; each is a way the schema alone cannot stop a bug.
+
+- **Upsert on the per-user keys.**
+  SnapTrade connection and account ids are unique per user (`connections_user_authorization_key`, `brokerage_accounts_user_snaptrade_key`), because an OAuth user can share one connection with others.
+  Every sync upsert targets those `(user_id, snaptrade_id)` keys, so it can only ever update the signed-in user's rows.
+- **Recover stale sync locks.**
+  `sync_runs_one_running_key` allows one `running` row per user.
+  A function that dies mid-sync leaves that row behind and would block the user forever, so a sync first marks `running` rows older than the function timeout as `failed`.
+- **Securities match on SnapTrade id, then on `(symbol, exchange, currency)`.**
+  Demo-only securities have no SnapTrade id but share the natural key with real ones, so a real sync inserting `RY / TSX / CAD` would hit `securities_symbol_exchange_currency_key`.
+  The upsert falls back to the natural key and adopts the SnapTrade id.
+- **Serialize token refreshes per user.**
+  SnapTrade rotates refresh tokens: using one invalidates it.
+  Two concurrent refreshes for one user (cron and the Refresh button) would leave one holding a dead token and force the user to sign in again.
+  Read the access token through `auth.api.getAccessToken` only inside a sync that holds the user's `sync_runs` lock.
+- **Parse SnapTrade money as decimals.**
+  The API returns prices, units, and amounts as JSON numbers.
+  Validate each response with zod and convert with `new Decimal(String(n))` in the activity mapper and nowhere else.
 
 ## Query-to-Index Map
 
 | Query | Served by |
 | --- | --- |
-| Hub: connections and accounts by brokerage | `idx_connections_user`, `idx_brokerage_accounts_user` |
+| Hub: connections and accounts by brokerage | `connections_user_authorization_key`, `brokerage_accounts_user_snaptrade_key` (both lead with `user_id`) |
 | Hub: pooled investments | `acb_positions_pkey` + `idx_holdings_user` |
 | Hub: per-account holdings | `holdings_account_security_key` |
 | Hub: alerts | `idx_tax_warnings_user`, `idx_superficial_losses_pending` |
@@ -81,7 +105,7 @@ erDiagram
 | Security detail and recompute: ledger by user | `idx_transactions_user_security_date` |
 | Tax Center year | `idx_realized_gains_user_year`, `idx_income_events_user_year`, `idx_superficial_losses_user_year`, `tax_year_summaries_pkey` |
 | Harvesting suggestions | `harvest_opportunities_pkey` |
-| Sync upsert | `transactions_account_activity_key` and the unique SnapTrade ids on connections, accounts, and securities |
+| Sync upsert | `connections_user_authorization_key`, `brokerage_accounts_user_snaptrade_key`, `transactions_account_activity_key`, and `securities.snaptrade_symbol_id` |
 | FX rate on or before a date | `fx_rates_pkey` |
 | Refresh once per 15 minutes | `idx_sync_runs_user_started` |
 | Delete my data and demo reset | `ON DELETE CASCADE` from `users`, with every cascading column indexed |
@@ -90,9 +114,9 @@ erDiagram
 
 ### Now
 
-1. Sign in with GitHub or Google, or one-click demo login.
-2. Register with SnapTrade and store the `userSecret` encrypted.
-3. Connect and reconnect brokerages, and block new connections at the free plan's 5-account cap.
+1. Sign in with Google or SnapTrade, connect SnapTrade later to a Google account, or use the one-click demo login.
+2. Keep the SnapTrade OAuth grant (encrypted access and refresh tokens) keyed on the SnapTrade user id.
+3. Track each brokerage connection and its status; users repair broken ones in the SnapTrade Dashboard.
 4. Sync accounts, balances, holdings, and every page of activities idempotently.
 5. Limit Refresh to once per 15 minutes, run the daily cron, and show the last sync and its errors.
 6. Confirm each account's type, which decides exclusion from gains and inclusion in superficial loss checks.

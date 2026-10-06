@@ -196,6 +196,7 @@ export function toDerivedRows(
         windowEnd: l.windowEnd,
       },
       replacements: l.replacements.map((r) => ({
+        userId,
         transactionId: r.entryId,
         accountId: r.accountId,
         accountType: r.accountType,

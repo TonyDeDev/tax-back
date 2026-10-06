@@ -1,10 +1,10 @@
 import { sql } from "drizzle-orm";
-import { boolean, check, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { bigint, boolean, check, index, integer, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 /**
  * Better Auth core tables (Drizzle adapter, `usePlural: true`).
- * Shapes follow the Better Auth core schema; re-check with `npx @better-auth/cli generate` when auth is wired up.
- * `accounts` holds OAuth links, not brokerage accounts (those are `brokerage_accounts`).
+ * Shapes match `getAuthTables()` from `better-auth/db` (checked on 1.7.7); re-check after upgrading Better Auth.
+ * `accounts` holds the Google and SnapTrade OAuth grants (encrypted tokens), not brokerage accounts (those are `brokerage_accounts`).
  */
 
 const timestamps = {
@@ -63,7 +63,12 @@ export const accounts = pgTable(
     password: text("password"),
     ...timestamps,
   },
-  (t) => [index("idx_accounts_user").on(t.userId)],
+  (t) => [
+    index("idx_accounts_user").on(t.userId),
+    // `account_id` is the SnapTrade Personal user id (the id_token `sub`), which users are keyed on:
+    // one SnapTrade identity can never belong to two TaxBack users.
+    uniqueIndex("accounts_provider_account_key").on(t.providerId, t.accountId),
+  ],
 );
 
 export const verifications = pgTable(
@@ -77,3 +82,15 @@ export const verifications = pgTable(
   },
   (t) => [index("idx_verifications_identifier").on(t.identifier)],
 );
+
+/**
+ * Better Auth's database-backed rate limiter (`rateLimit.storage: "database"`).
+ * Serverless instances share no memory, so an in-memory limiter would reset on every cold start.
+ */
+export const rateLimits = pgTable("rate_limits", {
+  id: text("id").primaryKey(),
+  key: text("key").notNull().unique(),
+  count: integer("count").notNull(),
+  /** Epoch milliseconds, as Better Auth writes it. */
+  lastRequest: bigint("last_request", { mode: "number" }).notNull(),
+});

@@ -1,7 +1,7 @@
 import "server-only";
 import { Pool } from "@neondatabase/serverless";
 import { drizzle } from "drizzle-orm/neon-serverless";
-import { getEnv } from "@/lib/env";
+import { getEnv } from "@/server/env";
 import * as schema from "./schema";
 
 /** The WebSocket driver, not neon-http: recompute replaces derived rows inside an interactive transaction. */

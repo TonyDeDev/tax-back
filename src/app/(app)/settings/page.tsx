@@ -1,14 +1,49 @@
 import type { Metadata } from "next";
-import { Link2 } from "lucide-react";
+import { CheckCircle2, ExternalLink, Link2 } from "lucide-react";
+import { ConnectSnapTradeButton } from "@/components/auth/connect-snaptrade-button";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { hasSnapTradeGrant } from "@/server/auth/accounts";
+import { configuredProviders } from "@/server/auth/config";
+import { requireUser } from "@/server/auth/session";
+import { SNAPTRADE_DASHBOARD_URL } from "@/server/auth/snaptrade-provider";
+import { getDb } from "@/server/db";
+import { getEnv } from "@/server/env";
 
 export const metadata: Metadata = { title: "Settings" };
 
-export default function Settings() {
+/** Better Auth sends `?error=<code>` back here when "Connect with SnapTrade" fails. */
+function connectError(code: string | undefined): string | null {
+  if (!code) return null;
+  if (code === "access_denied") return "SnapTrade access was not granted, so nothing was connected.";
+  if (code === "account_ownership_conflict") return "That SnapTrade account is already connected to a different TaxBack account.";
+  return "SnapTrade could not be connected. Try again.";
+}
+
+const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
+const manageInSnapTrade = (
+  <a
+    href={SNAPTRADE_DASHBOARD_URL}
+    target="_blank"
+    rel="noopener noreferrer"
+    className={buttonVariants({ variant: "outline", size: "sm" })}
+  >
+    Manage in SnapTrade
+    <ExternalLink aria-hidden className="size-4" />
+  </a>
+);
+
+export default async function Settings(props: PageProps<"/settings">) {
+  const user = await requireUser("/settings");
+  const params = await props.searchParams;
+  const connected = !user.isDemo && (await hasSnapTradeGrant(getDb(), user.id));
+  const error = connectError(first(params.error));
+  const justConnected = connected && first(params.connected) === "snaptrade";
+
   return (
     <>
       <PageHeader title="Settings" />
@@ -27,18 +62,44 @@ export default function Settings() {
       <Card>
         <CardHeader>
           <CardTitle>Connected brokerages</CardTitle>
-          <CardDescription>The free SnapTrade plan allows 5 connected accounts.</CardDescription>
+          <CardDescription>
+            TaxBack reads your brokerages through SnapTrade, read-only. You add, repair, or remove brokerages in your
+            SnapTrade account, and TaxBack picks up the change on the next refresh.
+          </CardDescription>
         </CardHeader>
-        <CardContent>
-          <EmptyState
-            icon={Link2}
-            title="No brokerages connected"
-            action={
-              <Button size="sm" disabled>
-                Connect a brokerage
-              </Button>
-            }
-          />
+        <CardContent className="flex flex-col gap-3">
+          {error && (
+            <p role="alert" className="rounded-md border border-destructive px-3 py-2 text-body-sm text-destructive">
+              {error}
+            </p>
+          )}
+          {justConnected && (
+            <p role="status" className="flex items-center gap-2 rounded-md border px-3 py-2 text-body-sm">
+              <CheckCircle2 aria-hidden className="size-4 shrink-0 text-positive" />
+              SnapTrade is connected.
+            </p>
+          )}
+          {user.isDemo ? (
+            <EmptyState
+              icon={Link2}
+              title="Sample brokerages"
+              description="The demo uses sample data. Sign in to connect your own brokerages."
+            />
+          ) : connected ? (
+            <EmptyState
+              icon={Link2}
+              title="SnapTrade connected"
+              description="Brokerages you share in SnapTrade show up in the Hub after a refresh."
+              action={manageInSnapTrade}
+            />
+          ) : (
+            <EmptyState
+              icon={Link2}
+              title="No brokerages yet"
+              description="Connect your SnapTrade account (free) to share your brokerages. You sign in to SnapTrade and approve read-only access."
+              action={<ConnectSnapTradeButton disabled={!configuredProviders(getEnv()).snaptrade} />}
+            />
+          )}
         </CardContent>
       </Card>
 

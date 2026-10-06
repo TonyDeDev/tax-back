@@ -5,10 +5,12 @@ import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Hub" };
 
-export default function Hub() {
+export default async function Hub() {
+  await requireUser("/hub");
   return (
     <>
       <PageHeader title="Hub" description="Every account in one place, with Canadian tax insight." />

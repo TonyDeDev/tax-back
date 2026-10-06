@@ -4,11 +4,13 @@ import Link from "next/link";
 import { EmptyState } from "@/components/empty-state";
 import { PageHeader } from "@/components/page-header";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Security" };
 
 export default async function SecurityDetail(props: PageProps<"/hub/securities/[id]">) {
   const { id } = await props.params;
+  await requireUser(`/hub/securities/${id}`);
   return (
     <>
       <Link href="/hub" className="inline-flex items-center gap-1 text-body-sm text-link hover:underline">

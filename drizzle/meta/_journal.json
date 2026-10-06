@@ -8,6 +8,20 @@
       "when": 1791244599918,
       "tag": "0000_init",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791248345533,
+      "tag": "0001_auth_and_tenant_fks",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791250390395,
+      "tag": "0002_snaptrade_oauth",
+      "breakpoints": true
     }
   ]
 }

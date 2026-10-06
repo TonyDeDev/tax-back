@@ -150,8 +150,95 @@ describe("constraints", () => {
     await rejectsWith(db.insert(s.transactions).values(tx({ snaptradeActivityId: "1" })), "transactions_account_activity_key");
   });
 
+  it("scopes SnapTrade connection and account ids per user, so two users can share one connection", async () => {
+    const [shared] = await db
+      .insert(s.connections)
+      .values({ userId: B, snaptradeAuthorizationId: "demo-x", brokerageSlug: "questrade", brokerageName: "Questrade" })
+      .returning();
+    await db
+      .insert(s.brokerageAccounts)
+      .values({ userId: B, connectionId: shared!.id, snaptradeAccountId: "demo-x-1", name: "Margin", baseCurrency: "CAD" });
+    await rejectsWith(
+      db.insert(s.connections).values({ userId: A, snaptradeAuthorizationId: "demo-x", brokerageSlug: "q", brokerageName: "Q" }),
+      "connections_user_authorization_key",
+    );
+    await rejectsWith(
+      db.insert(s.brokerageAccounts).values({ userId: A, connectionId: ids.x, snaptradeAccountId: "demo-x-1", name: "M", baseCurrency: "CAD" }),
+      "brokerage_accounts_user_snaptrade_key",
+    );
+    await db.delete(s.connections).where(eq(s.connections.id, shared!.id));
+  });
+
   it("keeps a transaction from pointing at another user's account", async () => {
     await rejectsWith(db.insert(s.transactions).values(tx({ snaptradeActivityId: "x1", userId: B })), "transactions_account_fkey");
+  });
+
+  it("keeps derived rows from pointing at another user's transaction or account", async () => {
+    const [own] = await db.select().from(s.transactions).where(eq(s.transactions.snaptradeActivityId, "3"));
+    const [conn] = await db
+      .insert(s.connections)
+      .values({ userId: B, snaptradeAuthorizationId: "b-conn", brokerageSlug: "questrade", brokerageName: "Questrade" })
+      .returning();
+    const [otherAccount] = await db
+      .insert(s.brokerageAccounts)
+      .values({ userId: B, connectionId: conn!.id, snaptradeAccountId: "b-acct", name: "Margin", baseCurrency: "CAD" })
+      .returning();
+
+    await rejectsWith(
+      db.insert(s.taxWarnings).values({ userId: B, type: "opening_balance_needed", securityId: ids.shop, transactionId: own!.id }),
+      "tax_warnings_transaction_fkey",
+    );
+    const gain = {
+      userId: A,
+      transactionId: own!.id,
+      securityId: ids.shop,
+      accountId: ids.nonReg1,
+      kind: "sale" as const,
+      dispositionDate: "2024-06-03",
+      taxYear: 2024,
+      quantity: "50",
+      proceedsCad: "1500",
+      acbCad: "752.5",
+      feesCad: "5",
+      gainCad: "742.5",
+      allowedGainCad: "742.5",
+    };
+    await rejectsWith(db.insert(s.realizedGains).values({ ...gain, accountId: otherAccount!.id }), "realized_gains_account_fkey");
+
+    const [loss] = await db
+      .insert(s.superficialLosses)
+      .values({
+        userId: A,
+        saleTransactionId: own!.id,
+        securityId: ids.shop,
+        saleDate: "2024-06-03",
+        taxYear: 2024,
+        status: "final",
+        quantitySold: "50",
+        quantityDenied: "0",
+        totalLossCad: "0",
+        deniedLossCad: "0",
+        allowedLossCad: "0",
+        windowStart: "2024-05-04",
+        windowEnd: "2024-07-03",
+      })
+      .returning();
+    await rejectsWith(
+      db.insert(s.superficialLossReplacements).values({
+        superficialLossId: loss!.id,
+        userId: B,
+        transactionId: own!.id,
+        accountId: ids.nonReg1,
+        accountType: "non_registered",
+        quantity: "1",
+        deniedCad: "0",
+        disposition: "added_to_acb",
+      }),
+      "slr_superficial_loss_fkey",
+    );
+
+    await db.delete(s.superficialLosses).where(eq(s.superficialLosses.id, loss!.id));
+    await db.delete(s.connections).where(eq(s.connections.id, conn!.id));
   });
 
   it("allows one demo user and one running sync per user", async () => {
@@ -272,7 +359,7 @@ describe("delete my data", () => {
   it("removes every row the user owns and leaves other users and global data alone", async () => {
     await db.delete(s.users).where(eq(s.users.id, A));
     const owned = [
-      "user_profiles", "snaptrade_users", "connections", "brokerage_accounts", "transactions", "holdings",
+      "user_profiles", "connections", "brokerage_accounts", "transactions", "holdings",
       "account_balances", "manual_adjustments", "sync_runs", "acb_positions", "acb_events", "realized_gains",
       "superficial_losses", "income_events", "harvest_opportunities", "tax_year_summaries", "tax_warnings",
     ];

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { DemoButton } from "@/components/auth/demo-button";
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
@@ -26,11 +27,8 @@ export default function Landing() {
             and tax-loss harvesting chances before they cost you.
           </p>
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row">
-          {/* Becomes a demo-login server action in the auth phase. */}
-          <Link href="/hub" className={buttonVariants({ size: "lg" })}>
-            Try the demo
-          </Link>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
+          <DemoButton size="lg" />
           <Link href="/sign-in" className={buttonVariants({ variant: "outline", size: "lg" })}>
             Sign in
           </Link>

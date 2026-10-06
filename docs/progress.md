@@ -1,6 +1,6 @@
 # Progress
 
-Status as of 2026-10-04.
+Status as of 2026-10-05.
 The full plan is in the Claude plan file, and scope rules are in `CLAUDE.md`.
 
 ## Done
@@ -51,32 +51,74 @@ Four defects found by reading the engine, each reproduced as a failing test befo
 ### Phase 3 (partial) - Database schema
 
 - Drizzle schema in `src/server/db/schema.ts` and Better Auth tables in `src/server/db/auth-schema.ts`; design notes in `docs/schema.md`.
-- First migration generated in `drizzle/0000_init.sql`; not yet applied to Neon.
+- Migrations `0000_init`, `0001_auth_and_tenant_fks`, and `0002_snaptrade_oauth` applied to Neon.
 - Row-to-engine mappers (`ledger.ts`) and a transactional derived-table writer (`derived.ts`).
-- PGlite tests apply the real migration and cover constraints, a full ledger round trip through `computeTax`, index use, and delete-my-data cascades.
+- PGlite tests apply the real migrations and cover constraints, a full ledger round trip through `computeTax`, index use, cross-tenant references, and delete-my-data cascades.
+
+### Phase 4 - Auth
+
+- Better Auth with the Drizzle adapter (`src/server/auth/config.ts`): Google sign-in, and "Sign in with SnapTrade" as an OpenID Connect provider (`snaptrade-provider.ts`), each enabled when its credentials are set.
+- Google users connect SnapTrade later from Settings ("Connect with SnapTrade", an explicit `linkSocial`); accounts are never merged by matching email.
+- Sign-in and brokerage access are one SnapTrade consent (`openid email profile read`); id_tokens are verified against the SnapTrade JWKS, issuer, audience, expiry, and nonce, and users are keyed on `sub`.
+- The SnapTrade tokens are stored encrypted, and the endpoints that return them are blocked over HTTP.
+- One-click demo login as a Better Auth plugin endpoint (`POST /api/auth/demo/sign-in`), rate limited to 10 per minute per client with database-backed limits.
+- `requireUser()`, `requireUserForAction()`, and `requireWritableUser()` in `src/server/auth/session.ts`; every app page calls `requireUser()`.
+- `src/proxy.ts`: early redirect to sign-in without a session cookie, nonce-based CSP, and security headers.
+- Sign-in page with Google and SnapTrade buttons and error states, a Settings card that connects or manages SnapTrade, demo button on the landing and sign-in pages, user menu and sign out in the shell.
+- Setup and OAuth app instructions in `docs/setup.md`.
+- Integration tests drive the real config through `auth.handler` on PGlite, including full Google and SnapTrade OIDC round trips against stubbed providers: forged signature, audience, issuer, nonce, expiry, and state tests, plus linking, ownership conflicts, and email-takeover attempts.
+
+### Switch to SnapTrade OAuth (2026-10-05)
+
+- GitHub sign-in, the Commercial `registerUser` flow, `snaptrade_users`, `ENCRYPTION_KEY`, and `snaptrade-typescript-sdk` (it has no OAuth mode) were removed.
+- SnapTrade connection and account ids are now unique per user, since an OAuth connection can be shared.
+- Google sign-in was kept so people can try TaxBack before setting up SnapTrade.
+- Free testing was checked against https://docs.snaptrade.com/docs/oauth-apps.
+  The Test app is free, needs no KYC, supports every scope and real brokerages, and allows 5 users.
+  OAuth is a free preview, and SnapTrade says paid pricing will follow.
+
+### Security audit (2026-10-05)
+
+Fixed:
+
+- The shared demo user could list other visitors' sessions (IP and user agent), revoke them, or change the account.
+  Demo sessions now store no IP or user agent, and may only call an allowlist of auth endpoints.
+- The demo email was claimable through OAuth account linking.
+  It now uses the reserved `.invalid` domain, provider identities with that email are refused, and no OAuth account can be linked to the demo user.
+- OAuth tokens were stored in plaintext; they are now encrypted.
+- Derived tables referenced transactions and accounts by `id` alone; they now use `(id, user_id)` composite keys.
+- Env validation was minimal and lived in the client-safe folder; it is now strict and in `src/server/env.ts`.
+- No security headers; the proxy now sets a nonce CSP, `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, and HSTS in production.
+- Better Auth disables its origin and CSRF checks when `NODE_ENV` is `test`; the config pins them on so tests match production.
+- The app shell was a full viewport tall under the demo badge, so every page scrolled by the badge height and the sidebar footer was clipped.
+
+Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): per-user upsert keys, stale sync lock recovery, security natural-key collisions, serialized refresh-token rotation, and decimal parsing at the SnapTrade boundary.
 
 ### Docs
 
 - `docs/dev.md`: developer quick start.
+- `docs/setup.md`: environment variables and the SnapTrade OAuth app.
 - `docs/tax-rules.md`: rules implemented and known limits.
-- `docs/schema.md`: tables, design decisions, query-to-index map, and what the schema supports.
+- `docs/schema.md`: tables, design decisions, rules for writers, query-to-index map, and what the schema supports.
 
 ## Not started
 
 - Phase 1 remainder: data table, alert banner, and a styleguide route.
-- Phase 3 remainder: page read queries, and applying the migration to a Neon project.
-- Phase 4: auth.
-- Phase 5: demo seed and recompute pipeline.
+- Phase 3 remainder: page read queries.
+- Phase 5: demo seed and recompute pipeline (the demo user exists with id `demo` but has no data yet).
 - Phases 6 and 7: Hub, Tax Center, Settings, landing page.
-- Phase 8: SnapTrade integration.
+- Phase 8: SnapTrade sync over the OAuth Bearer token (`src/server/snaptrade/`, `fetch` + zod).
 - Phases 9 and 10: quality pass and deploy.
 
 ## Open items
 
+- Create the SnapTrade Test OAuth app and the Google OAuth client and add their credentials by hand (`docs/setup.md`), then test both sign-ins and "Connect with SnapTrade" end to end.
+- A "Disconnect SnapTrade" action should revoke the refresh token at SnapTrade before unlinking (Better Auth's unlink alone does not revoke).
+- Re-check SnapTrade OAuth pricing before launch: the free preview is expected to last a few months.
 - Verify the 2019-2026 dividend rates against CRA.
 - Raise engine coverage to 100%.
-- Add the SnapTrade keys to `.env.local` by hand.
 - `package.json` pins `@types/node@^20` while vitest 5 wants `^22 || >=24`. pnpm tolerates the
   mismatch; npm refuses to resolve it without `--legacy-peer-deps`. Worth aligning.
 - Surface `superficial_loss_pending` in the Hub alerts so an open 30-day window is visible while the
   user can still act on it.
+- The daily cron should delete expired sessions for every user (demo sign-in already purges the demo's).

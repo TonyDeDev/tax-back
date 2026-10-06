@@ -1,9 +1,7 @@
 import { eq } from "drizzle-orm";
-import type { PgDatabase, PgQueryResultHKT } from "drizzle-orm/pg-core";
 import type { DerivedRows } from "./ledger";
 import * as s from "./schema";
-
-type AnyDb = PgDatabase<PgQueryResultHKT, typeof s>;
+import type { AnyDb } from "./types";
 
 /** Keeps each insert well under Postgres' 65535 bind parameter limit. */
 const CHUNK = 500;

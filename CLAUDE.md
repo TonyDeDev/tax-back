@@ -20,8 +20,8 @@ It is a demo tool, not a commercial product and not tax advice.
 | App (frontend + backend) | Next.js (App Router), TypeScript strict |
 | Hosting | Vercel Hobby (free) |
 | Database | Neon Postgres (free) + Drizzle ORM |
-| Auth | Better Auth: GitHub/Google sign-in + one-click demo login |
-| Brokerage data | SnapTrade Build plan (free, 5 connected accounts) |
+| Auth | Better Auth: Google sign-in, Sign in with SnapTrade (OpenID Connect), and one-click demo login |
+| Brokerage data | SnapTrade OAuth app (free preview; the Test app allows 5 users) |
 | FX rates | Bank of Canada Valet API (free) |
 | UI | Tailwind CSS v4, shadcn/ui, Lucide, Recharts, TanStack Table, next-themes |
 | Validation / money | zod, decimal.js |
@@ -43,17 +43,29 @@ scripts/seed-demo.ts   demo data generator
 
 ## SnapTrade
 
-- The server registers each user (`registerUser`) and gets a `userId` + `userSecret`.
-  `userSecret` is returned only once; store it encrypted (AES-256-GCM, `ENCRYPTION_KEY`).
-- `clientId`, `consumerKey`, and `userSecret` never reach the browser.
+TaxBack is a SnapTrade OAuth app (https://docs.snaptrade.com/docs/oauth-apps), not a Commercial integration.
+Users have a free SnapTrade Personal account, connect their brokerages there, and grant TaxBack access.
+
+- **Two ways in:**
+  - "Continue with Google" for people who want to look around first; they connect SnapTrade later from Settings ("Connect with SnapTrade", Better Auth `linkSocial`).
+  - "Continue with SnapTrade" for people who already use it; sign-in and brokerage access are one consent.
+- **SnapTrade is OIDC:** authorization code flow with PKCE, nonce, and id_token verification against the JWKS (Better Auth `genericOAuth`, `src/server/auth/snaptrade-provider.ts`).
+  Scopes are `openid email profile read`; never request `trade`.
+  The SnapTrade identity is keyed on the verified id_token `sub`, never on email; `email` may be declined.
+- **Account linking is explicit only:** implicit linking by matching email is disabled, because it would let a SnapTrade account registered under someone else's email merge into their TaxBack account.
+  A sign-in whose email already has an account gets `account_not_linked`; the user signs in the original way and connects SnapTrade in Settings.
+- **Tokens:** Better Auth stores the access token (10 hours) and the rotating refresh token encrypted in `accounts`.
+  The client secret and tokens never reach the browser: `/get-access-token`, `/refresh-token`, and `/account-info` are blocked over HTTP and only callable through `auth.api` on the server.
+- **API calls:** `fetch` against `https://api.snaptrade.com` with `Authorization: Bearer <access token>` and no Commercial auth fields; validate every response with zod.
+  `snaptrade-typescript-sdk` has no OAuth mode and is not used.
   SnapTrade code lives in `src/server/snaptrade/` and imports `server-only`.
-- Use `snaptrade-typescript-sdk`.
-- **Connect:** server action creates a Connection Portal URL with `customRedirect` to `/connect/callback`, browser redirects there, callback runs a sync.
-- **Reconnect:** same portal URL with the connection id in `reconnect`; show a "Reconnect" button for broken connections.
+- **Connections are managed in the SnapTrade Dashboard** (add, repair, remove); TaxBack links there and never shows a Connection Portal.
 - **Data used:** accounts, balances, holdings, and account activities (paginated, max 1000 per page, always fetch all pages).
-- **Sync** runs on connect, on a "Refresh" button (once per 15 min), and once daily via Vercel Cron (`/api/cron/sync`, protected by `CRON_SECRET`).
+- **Sync** runs when the SnapTrade grant is first given (sign-in or connect), on a "Refresh" button (once per 15 min), and once daily via Vercel Cron (`/api/cron/sync`, protected by `CRON_SECRET`).
   A sync fetches everything, upserts by SnapTrade id (safe to repeat), then recomputes the user's tax data.
-- Free plan allows 5 connected accounts; when full, the Connect button points users to the demo.
+  A `401` means refresh once and retry once; if that fails, the user must sign in with SnapTrade again.
+- **Limits:** the Test OAuth app allows 5 users and is free; Production needs SnapTrade KYC approval.
+  OAuth access is a free preview and SnapTrade has said paid pricing will follow, so re-check https://docs.snaptrade.com/docs/oauth-apps before relying on it.
 
 ## Tax Engine (`src/tax-engine`)
 
@@ -81,7 +93,7 @@ The browser never calculates tax; it only displays saved results.
 
 ## Data Model
 
-`users` (Better Auth), `snaptrade_users`, `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `fx_rates`, and the derived tables `acb_positions`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`.
+`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `fx_rates`, and the derived tables `acb_positions`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`.
 
 ## Demo Data
 
@@ -94,7 +106,7 @@ The daily cron resets it.
 - **Hub** (`/hub`): total value, YTD gains, estimated tax, alerts, accounts grouped by brokerage, investments table (pooled by default, per-account toggle), allocation charts.
   Detail pages for each account and each security (with ACB breakdown).
 - **Tax Center** (`/tax/[year]`): realized gains (Schedule 3 layout), superficial losses, dividends, harvesting suggestions with the 30-day window, CSV export.
-- **Settings:** theme, connected brokerages, delete my data.
+- **Settings:** theme, connected brokerages (link to the SnapTrade Dashboard), delete my data (revokes the SnapTrade refresh token first).
 
 Every page shows a "Concept demo - not tax advice" badge.
 
@@ -136,7 +148,7 @@ pnpm typecheck
 pnpm test
 ```
 
-Environment variables (see `.env.example`): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY`, `ENCRYPTION_KEY`, `CRON_SECRET`.
+Environment variables (see `.env.example` and `docs/setup.md`): `DATABASE_URL`, `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SNAPTRADE_OAUTH_CLIENT_ID`, `SNAPTRADE_OAUTH_CLIENT_SECRET`, `CRON_SECRET`.
 
 Deploy by pushing to GitHub; Vercel builds automatically.
 

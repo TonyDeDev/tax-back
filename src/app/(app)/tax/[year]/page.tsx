@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { requireUser } from "@/server/auth/session";
 
 export const metadata: Metadata = { title: "Tax Center" };
 
@@ -14,6 +15,7 @@ const YEARS = [2026, 2025, 2024];
 
 export default async function TaxCenter(props: PageProps<"/tax/[year]">) {
   const { year: raw } = await props.params;
+  await requireUser(`/tax/${raw}`);
   const year = Number(raw);
   if (!YEARS.includes(year)) notFound();
 

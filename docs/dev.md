@@ -7,14 +7,14 @@ It is the source of truth for scope, stack, and rules.
 
 1. Install Node 22+ and pnpm.
 2. Run `pnpm install`.
-3. Copy `.env.example` to `.env.local` and fill in the values.
+3. Copy `.env.example` to `.env.local` and fill in the values (see `docs/setup.md`).
 4. Never commit `.env.local` and never paste secrets into chat or issues.
 
-## SnapTrade keys
+## SnapTrade OAuth app
 
-1. Get a Client ID and Consumer Key from the SnapTrade dashboard (Build plan, free).
-2. Put them in `.env.local` as `SNAPTRADE_CLIENT_ID` and `SNAPTRADE_CONSUMER_KEY`.
-3. Only code in `src/server/snaptrade/` may read them, and it must import `server-only`.
+1. Create the Test OAuth app in the SnapTrade Dashboard (free, 5 users), following `docs/setup.md`.
+2. Put its client id and secret in `.env.local` as `SNAPTRADE_OAUTH_CLIENT_ID` and `SNAPTRADE_OAUTH_CLIENT_SECRET`.
+3. Only server code may read them or the stored tokens, and SnapTrade code imports `server-only`.
 
 ## Commands
 

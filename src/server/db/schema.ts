@@ -1,8 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
+  type AnyPgColumn,
   boolean,
   check,
-  customType,
   date,
   foreignKey,
   index,
@@ -28,8 +28,6 @@ export * from "./auth-schema";
  * Numbers come back as strings and go straight into decimal.js; never parse them as `number`.
  * Derived tables are a cache of `computeTax()` output, replaced per user on every recompute.
  */
-
-const bytea = customType<{ data: Buffer; driverData: Buffer }>({ dataType: () => "bytea" });
 
 const money = (name: string) => numeric(name, { precision: 20, scale: 6 });
 const quantity = (name: string) => numeric(name, { precision: 28, scale: 10 });
@@ -80,7 +78,7 @@ export const WARNING_TYPES = [
   "assumed_year_config",
 ] as const;
 
-// ===== Profile and SnapTrade identity =====
+// ===== Profile =====
 
 export const userProfiles = pgTable(
   "user_profiles",
@@ -105,26 +103,6 @@ export const userProfiles = pgTable(
   ],
 );
 
-/** `userSecret` is returned once by SnapTrade `registerUser`; stored AES-256-GCM encrypted with `ENCRYPTION_KEY`. */
-export const snaptradeUsers = pgTable(
-  "snaptrade_users",
-  {
-    userId: text("user_id")
-      .primaryKey()
-      .references(() => users.id, { onDelete: "cascade" }),
-    snaptradeUserId: text("snaptrade_user_id").notNull().unique(),
-    secretCiphertext: bytea("secret_ciphertext").notNull(),
-    secretIv: bytea("secret_iv").notNull(),
-    secretTag: bytea("secret_tag").notNull(),
-    keyVersion: smallint("key_version").notNull().default(1),
-    createdAt: createdAt(),
-  },
-  () => [
-    check("snaptrade_users_secret_iv_check", sql`octet_length(secret_iv) = 12`),
-    check("snaptrade_users_secret_tag_check", sql`octet_length(secret_tag) = 16`),
-  ],
-);
-
 // ===== Brokerage data (upserted by SnapTrade id) =====
 
 /** One SnapTrade brokerage authorization. The demo seed uses `demo-` prefixed ids. */
@@ -133,7 +111,7 @@ export const connections = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: userRef(),
-    snaptradeAuthorizationId: text("snaptrade_authorization_id").notNull().unique(),
+    snaptradeAuthorizationId: text("snaptrade_authorization_id").notNull(),
     brokerageSlug: text("brokerage_slug").notNull(),
     brokerageName: text("brokerage_name").notNull(),
     status: text("status", { enum: CONNECTION_STATUSES }).notNull().default("active"),
@@ -143,7 +121,9 @@ export const connections = pgTable(
   },
   (t) => [
     unique("connections_id_user_id_key").on(t.id, t.userId),
-    index("idx_connections_user").on(t.userId),
+    // Per user, not global: an OAuth user can share one SnapTrade connection with others (workspaces), and
+    // the sync upserts on this key, so it can only ever touch the signed-in user's own rows.
+    unique("connections_user_authorization_key").on(t.userId, t.snaptradeAuthorizationId),
     check("connections_status_check", inList("status", CONNECTION_STATUSES)),
   ],
 );
@@ -154,7 +134,7 @@ export const brokerageAccounts = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     userId: text("user_id").notNull(),
     connectionId: uuid("connection_id").notNull(),
-    snaptradeAccountId: text("snaptrade_account_id").notNull().unique(),
+    snaptradeAccountId: text("snaptrade_account_id").notNull(),
     name: text("name").notNull(),
     /** Last 4 digits only, never the full number. */
     numberMasked: text("number_masked"),
@@ -171,13 +151,13 @@ export const brokerageAccounts = pgTable(
   },
   (t) => [
     unique("brokerage_accounts_id_user_id_key").on(t.id, t.userId),
+    unique("brokerage_accounts_user_snaptrade_key").on(t.userId, t.snaptradeAccountId),
     foreignKey({
       name: "brokerage_accounts_connection_fkey",
       columns: [t.connectionId, t.userId],
       foreignColumns: [connections.id, connections.userId],
     }).onDelete("cascade"),
     index("idx_brokerage_accounts_connection").on(t.connectionId, t.userId),
-    index("idx_brokerage_accounts_user").on(t.userId),
     currencyCheck("brokerage_accounts_base_currency_check", "base_currency"),
     check("brokerage_accounts_account_type_check", inList("account_type", ACCOUNT_TYPES)),
   ],
@@ -237,6 +217,7 @@ export const transactions = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    unique("transactions_id_user_id_key").on(t.id, t.userId),
     unique("transactions_account_activity_key").on(t.accountId, t.snaptradeActivityId),
     foreignKey({
       name: "transactions_account_fkey",
@@ -333,6 +314,7 @@ export const manualAdjustments = pgTable(
     updatedAt: updatedAt(),
   },
   (t) => [
+    unique("manual_adjustments_id_user_id_key").on(t.id, t.userId),
     unique("manual_adjustments_user_security_key").on(t.userId, t.securityId),
     index("idx_manual_adjustments_security").on(t.securityId),
     check("manual_adjustments_quantity_check", sql`quantity >= 0`),
@@ -385,6 +367,24 @@ export const syncRuns = pgTable(
 
 // ===== Derived (replaced per user on every recompute) =====
 
+/*
+ * Derived rows reference the ledger through `(id, user_id)` like every other child, so a recompute
+ * bug can never attach one user's result to another user's transaction or account.
+ * A NULL source id skips the check (MATCH SIMPLE), which is what the nullable sources want.
+ */
+const ownTransaction = (name: string, transactionId: AnyPgColumn, userId: AnyPgColumn) =>
+  foreignKey({
+    name,
+    columns: [transactionId, userId],
+    foreignColumns: [transactions.id, transactions.userId],
+  }).onDelete("cascade");
+const ownAccount = (name: string, accountId: AnyPgColumn, userId: AnyPgColumn) =>
+  foreignKey({
+    name,
+    columns: [accountId, userId],
+    foreignColumns: [brokerageAccounts.id, brokerageAccounts.userId],
+  }).onDelete("cascade");
+
 export const acbPositions = pgTable(
   "acb_positions",
   {
@@ -412,10 +412,8 @@ export const acbEvents = pgTable(
       .references(() => securities.id, { onDelete: "cascade" }),
     /** Engine order within the security; the breakdown's sort key. */
     seq: integer("seq").notNull(),
-    transactionId: uuid("transaction_id").references(() => transactions.id, { onDelete: "cascade" }),
-    manualAdjustmentId: uuid("manual_adjustment_id").references(() => manualAdjustments.id, {
-      onDelete: "cascade",
-    }),
+    transactionId: uuid("transaction_id"),
+    manualAdjustmentId: uuid("manual_adjustment_id"),
     eventDate: day("event_date").notNull(),
     kind: text("kind", { enum: ACB_EVENT_KINDS }).notNull(),
     quantityDelta: quantity("quantity_delta").notNull(),
@@ -425,6 +423,12 @@ export const acbEvents = pgTable(
   },
   (t) => [
     primaryKey({ name: "acb_events_pkey", columns: [t.userId, t.securityId, t.seq] }),
+    ownTransaction("acb_events_transaction_fkey", t.transactionId, t.userId),
+    foreignKey({
+      name: "acb_events_manual_adjustment_fkey",
+      columns: [t.manualAdjustmentId, t.userId],
+      foreignColumns: [manualAdjustments.id, manualAdjustments.userId],
+    }).onDelete("cascade"),
     index("idx_acb_events_security").on(t.securityId),
     index("idx_acb_events_transaction").on(t.transactionId),
     index("idx_acb_events_manual").on(t.manualAdjustmentId),
@@ -438,15 +442,11 @@ export const realizedGains = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: userRef(),
-    transactionId: uuid("transaction_id")
-      .notNull()
-      .references(() => transactions.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id").notNull(),
     securityId: uuid("security_id")
       .notNull()
       .references(() => securities.id, { onDelete: "cascade" }),
-    accountId: uuid("account_id")
-      .notNull()
-      .references(() => brokerageAccounts.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").notNull(),
     kind: text("kind", { enum: ["sale", "roc_excess"] }).notNull(),
     dispositionDate: day("disposition_date").notNull(),
     taxYear: smallint("tax_year").notNull(),
@@ -464,6 +464,8 @@ export const realizedGains = pgTable(
   },
   (t) => [
     unique("realized_gains_transaction_kind_key").on(t.transactionId, t.kind),
+    ownTransaction("realized_gains_transaction_fkey", t.transactionId, t.userId),
+    ownAccount("realized_gains_account_fkey", t.accountId, t.userId),
     index("idx_realized_gains_user_year").on(t.userId, t.taxYear, t.dispositionDate),
     index("idx_realized_gains_security").on(t.securityId),
     index("idx_realized_gains_account").on(t.accountId),
@@ -476,10 +478,7 @@ export const superficialLosses = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: userRef(),
-    saleTransactionId: uuid("sale_transaction_id")
-      .notNull()
-      .unique()
-      .references(() => transactions.id, { onDelete: "cascade" }),
+    saleTransactionId: uuid("sale_transaction_id").notNull().unique(),
     securityId: uuid("security_id")
       .notNull()
       .references(() => securities.id, { onDelete: "cascade" }),
@@ -497,6 +496,8 @@ export const superficialLosses = pgTable(
     windowEnd: day("window_end").notNull(),
   },
   (t) => [
+    unique("superficial_losses_id_user_id_key").on(t.id, t.userId),
+    ownTransaction("superficial_losses_sale_transaction_fkey", t.saleTransactionId, t.userId),
     index("idx_superficial_losses_user_year").on(t.userId, t.taxYear),
     index("idx_superficial_losses_pending").on(t.userId, t.windowEnd).where(sql`status = 'pending'`),
     index("idx_superficial_losses_security").on(t.securityId),
@@ -508,15 +509,11 @@ export const superficialLosses = pgTable(
 export const superficialLossReplacements = pgTable(
   "superficial_loss_replacements",
   {
-    superficialLossId: uuid("superficial_loss_id")
-      .notNull()
-      .references(() => superficialLosses.id, { onDelete: "cascade" }),
-    transactionId: uuid("transaction_id")
-      .notNull()
-      .references(() => transactions.id, { onDelete: "cascade" }),
-    accountId: uuid("account_id")
-      .notNull()
-      .references(() => brokerageAccounts.id, { onDelete: "cascade" }),
+    superficialLossId: uuid("superficial_loss_id").notNull(),
+    /** No direct `users` reference: every row cascades from its loss, which has one. */
+    userId: text("user_id").notNull(),
+    transactionId: uuid("transaction_id").notNull(),
+    accountId: uuid("account_id").notNull(),
     /** Snapshot of the replacement account's type at compute time. */
     accountType: text("account_type", { enum: ACCOUNT_TYPES }).notNull(),
     quantity: quantity("quantity").notNull(),
@@ -525,6 +522,13 @@ export const superficialLossReplacements = pgTable(
   },
   (t) => [
     primaryKey({ name: "superficial_loss_replacements_pkey", columns: [t.superficialLossId, t.transactionId] }),
+    foreignKey({
+      name: "slr_superficial_loss_fkey",
+      columns: [t.superficialLossId, t.userId],
+      foreignColumns: [superficialLosses.id, superficialLosses.userId],
+    }).onDelete("cascade"),
+    ownTransaction("slr_transaction_fkey", t.transactionId, t.userId),
+    ownAccount("slr_account_fkey", t.accountId, t.userId),
     index("idx_slr_transaction").on(t.transactionId),
     index("idx_slr_account").on(t.accountId),
     check("slr_account_type_check", inList("account_type", ACCOUNT_TYPES)),
@@ -537,16 +541,11 @@ export const incomeEvents = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: userRef(),
-    transactionId: uuid("transaction_id")
-      .notNull()
-      .unique()
-      .references(() => transactions.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id").notNull().unique(),
     securityId: uuid("security_id")
       .notNull()
       .references(() => securities.id, { onDelete: "cascade" }),
-    accountId: uuid("account_id")
-      .notNull()
-      .references(() => brokerageAccounts.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id").notNull(),
     paidDate: day("paid_date").notNull(),
     taxYear: smallint("tax_year").notNull(),
     dividendClass: text("dividend_class", { enum: DIVIDEND_CLASSES }).notNull(),
@@ -556,6 +555,8 @@ export const incomeEvents = pgTable(
     withholdingCad: money("withholding_cad").notNull().default("0"),
   },
   (t) => [
+    ownTransaction("income_events_transaction_fkey", t.transactionId, t.userId),
+    ownAccount("income_events_account_fkey", t.accountId, t.userId),
     index("idx_income_events_user_year").on(t.userId, t.taxYear, t.paidDate),
     index("idx_income_events_security").on(t.securityId),
     index("idx_income_events_account").on(t.accountId),
@@ -622,7 +623,7 @@ export const taxWarnings = pgTable(
     userId: userRef(),
     type: text("type", { enum: WARNING_TYPES }).notNull(),
     securityId: uuid("security_id").references(() => securities.id, { onDelete: "cascade" }),
-    transactionId: uuid("transaction_id").references(() => transactions.id, { onDelete: "cascade" }),
+    transactionId: uuid("transaction_id"),
     taxYear: smallint("tax_year"),
     /** Units missing from the known position, for `opening_balance_needed`. */
     shortfallQuantity: quantity("shortfall_quantity"),
@@ -632,6 +633,7 @@ export const taxWarnings = pgTable(
     dueDate: day("due_date"),
   },
   (t) => [
+    ownTransaction("tax_warnings_transaction_fkey", t.transactionId, t.userId),
     index("idx_tax_warnings_user").on(t.userId, t.type),
     index("idx_tax_warnings_security").on(t.securityId),
     index("idx_tax_warnings_transaction").on(t.transactionId),

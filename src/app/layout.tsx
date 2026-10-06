@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { headers } from "next/headers";
 import { Red_Hat_Display, Red_Hat_Mono, Red_Hat_Text } from "next/font/google";
 import { DemoBadge } from "@/components/demo-badge";
 import { ThemeProvider } from "@/components/theme-provider";
@@ -13,7 +14,9 @@ export const metadata: Metadata = {
   description: "See your Canadian brokerage accounts and tax insight in one place. Concept demo, not tax advice.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default async function RootLayout({ children }: LayoutProps<"/">) {
+  // Set by `src/proxy.ts`; next-themes injects an inline script that the CSP only runs with this nonce.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html
       lang="en"
@@ -21,7 +24,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       className={`${display.variable} ${text.variable} ${mono.variable} h-full antialiased`}
     >
       <body className="flex min-h-full flex-col">
-        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange nonce={nonce}>
           <DemoBadge />
           <div className="flex flex-1 flex-col">{children}</div>
         </ThemeProvider>

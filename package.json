@@ -29,7 +29,6 @@
     "react-dom": "19.2.8",
     "recharts": "^3.10.1",
     "server-only": "^0.0.1",
-    "snaptrade-typescript-sdk": "^12.2.16",
     "tailwind-merge": "^3.7.0",
     "zod": "^4.6.5"
   },
