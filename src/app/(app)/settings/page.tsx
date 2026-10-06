@@ -1,7 +1,9 @@
+import { eq } from "drizzle-orm";
 import type { Metadata } from "next";
 import { CheckCircle2, ExternalLink, Link2 } from "lucide-react";
 import { ConnectSnapTradeButton } from "@/components/auth/connect-snaptrade-button";
 import { EmptyState } from "@/components/empty-state";
+import { MarginalRateForm } from "@/components/settings/marginal-rate-form";
 import { FirstSync } from "@/components/sync/first-sync";
 import { PageHeader } from "@/components/page-header";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -13,8 +15,10 @@ import { configuredProviders } from "@/server/auth/config";
 import { requireUser } from "@/server/auth/session";
 import { SNAPTRADE_DASHBOARD_URL } from "@/server/auth/snaptrade-provider";
 import { getDb } from "@/server/db";
+import * as s from "@/server/db/schema";
 import { getEnv } from "@/server/env";
 import { getLastSuccessfulSyncAt, getLastSync } from "@/server/queries/hub";
+import { D } from "@/tax-engine";
 
 export const metadata: Metadata = { title: "Settings" };
 // "Connect with SnapTrade" returns here, and the first sync runs as a server action on this page.
@@ -53,9 +57,12 @@ export default async function Settings(props: PageProps<"/settings">) {
   const error = connectError(first(params.error));
   const justConnected = connected && first(params.connected) === "snaptrade";
   const db = getDb();
-  const [lastSync, lastSuccessAt] = connected
-    ? await Promise.all([getLastSync(db, user.id), getLastSuccessfulSyncAt(db, user.id)])
-    : [null, null];
+  const [[lastSync, lastSuccessAt], [profile]] = await Promise.all([
+    connected ? Promise.all([getLastSync(db, user.id), getLastSuccessfulSyncAt(db, user.id)]) : Promise.resolve([null, null] as const),
+    db.select({ marginalRate: s.userProfiles.marginalRate }).from(s.userProfiles).where(eq(s.userProfiles.userId, user.id)),
+  ]);
+  // "0.43410" shows as "43.41".
+  const ratePercent = profile?.marginalRate ? new D(profile.marginalRate).times(100).toString() : "";
 
   return (
     <>
@@ -69,6 +76,19 @@ export default async function Settings(props: PageProps<"/settings">) {
         <CardContent className="flex items-center justify-between">
           <span className="text-body-sm">Theme</span>
           <ThemeToggle />
+        </CardContent>
+      </Card>
+
+      <Card id="marginal-rate" className="scroll-mt-12">
+        <CardHeader>
+          <CardTitle>Tax estimate</CardTitle>
+          <CardDescription>
+            Your combined federal and provincial marginal tax rate. TaxBack multiplies it by your taxable capital gains to
+            estimate the tax owed. Leave it blank for no estimate.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <MarginalRateForm initialPercent={ratePercent} readOnly={user.isDemo} />
         </CardContent>
       </Card>
 

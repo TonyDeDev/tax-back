@@ -21,8 +21,9 @@
     font-family: var(--font-display);
   }
 
+  /* 1px ring in the accent (Signal Green in dark), offset so it never merges with a hairline border. */
   :focus-visible {
-    outline: 2px solid var(--ring);
+    outline: 1px solid var(--ring);
     outline-offset: 2px;
   }
 }

@@ -13,6 +13,7 @@ export interface WarningView {
     | "roc_without_position"
     | "split_reported_twice"
     | "assumed_year_config";
+  securityId: string | null;
   symbol: string | null;
   taxYear: number | null;
   amountCad: string | null;
@@ -52,5 +53,53 @@ export function warningMessage(w: WarningView): string {
       return `${symbol}: the same split was reported on different dates. It was applied once.`;
     case "assumed_year_config":
       return `${w.taxYear ?? "A year"}: tax rates for this year are not verified yet, so the nearest year's rates were used.`;
+  }
+}
+
+/** One row in the Hub's "Needs attention" list. */
+export interface AttentionItem {
+  /** Negative needs the user to act; neutral is for their information. */
+  tone: "negative" | "neutral";
+  text: string;
+  href: string;
+  linkLabel: string;
+}
+
+/** A warning as one short line with a link to where it is resolved. The full sentence is `warningMessage`. */
+export function warningAttention(w: WarningView): AttentionItem {
+  const symbol = w.symbol ?? "A security";
+  const security = w.securityId ? `/hub/securities/${w.securityId}` : "/hub";
+  const amount = w.amountCad ? ` (${formatMoney(w.amountCad)})` : "";
+  switch (w.type) {
+    case "opening_balance_needed":
+      return { tone: "negative", text: `${symbol}: older history is missing`, href: `${security}#opening`, linkLabel: "Add opening balance" };
+    case "superficial_loss_lost_forever":
+      return { tone: "negative", text: `${symbol}: superficial loss denied for good${amount}`, href: `${security}#audit`, linkLabel: "Review" };
+    case "superficial_loss_pending":
+      return {
+        tone: "neutral",
+        text: `${symbol}: superficial loss pending${w.dueDate ? ` until ${formatDate(w.dueDate)}` : ""}`,
+        href: `${security}#audit`,
+        linkLabel: "Review",
+      };
+    case "unsupported_transfer":
+      return { tone: "neutral", text: `${symbol}: refresh to apply transfer rules`, href: security, linkLabel: "Review" };
+    case "transfer_unmatched":
+      return { tone: "negative", text: `${symbol}: transfer from an unseen account`, href: `${security}#opening`, linkLabel: "Review" };
+    case "transfer_value_missing":
+      return { tone: "negative", text: `${symbol}: transfer has no market value`, href: security, linkLabel: "Review" };
+    case "registered_transfer_loss_denied":
+      return { tone: "negative", text: `${symbol}: loss on move into a registered account${amount}`, href: `${security}#audit`, linkLabel: "Review" };
+    case "roc_without_position":
+      return { tone: "neutral", text: `${symbol}: return of capital with no shares held`, href: `${security}#audit`, linkLabel: "Review" };
+    case "split_reported_twice":
+      return { tone: "neutral", text: `${symbol}: split reported twice, applied once`, href: `${security}#audit`, linkLabel: "Review" };
+    case "assumed_year_config":
+      return {
+        tone: "neutral",
+        text: `${w.taxYear ?? "A year"}: tax rates not verified yet`,
+        href: w.taxYear ? `/tax/${w.taxYear}` : "/hub",
+        linkLabel: "Open Tax Center",
+      };
   }
 }

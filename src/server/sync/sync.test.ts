@@ -6,6 +6,7 @@ import { migrate } from "drizzle-orm/pglite/migrator";
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Auth } from "@/server/auth/config";
 import * as s from "@/server/db/schema";
+import { getHubSummary, getValueHistory } from "@/server/queries/hub";
 import { STALE_RUN_MS, SYNC_COOLDOWN_MS, syncUser } from "./sync";
 
 /*
@@ -186,7 +187,15 @@ function fakeAuth(over: Partial<{ getAccessToken: () => Promise<unknown>; refres
   return { auth: { api } as unknown as Auth, api };
 }
 
-async function rows(table: typeof s.transactions | typeof s.holdings | typeof s.brokerageAccounts | typeof s.connections, userId: string) {
+type UserTable =
+  | typeof s.transactions
+  | typeof s.holdings
+  | typeof s.brokerageAccounts
+  | typeof s.connections
+  | typeof s.accountValueSnapshots
+  | typeof s.securityPriceSnapshots;
+
+async function rows(table: UserTable, userId: string) {
   const [r] = await db.select({ n: count() }).from(table).where(eq(table.userId, userId));
   return r!.n;
 }
@@ -270,6 +279,13 @@ describe("syncUser", () => {
     const [profile] = await db.select().from(s.userProfiles).where(eq(s.userProfiles.userId, A));
     expect(profile!.lastSyncedAt).not.toBeNull();
     expect(profile!.lastRecomputedAt).not.toBeNull();
+
+    // Today's value snapshot is exactly the Hub total, so the chart ends on the number above it.
+    expect(await rows(s.accountValueSnapshots, A)).toBe(3);
+    const history = await getValueHistory(db, A);
+    const summary = await getHubSummary(db, A, "2026-10-06");
+    expect(history).toEqual([{ day: "2026-10-06", valueCad: summary.totalValueCad }]);
+    expect(await rows(s.securityPriceSnapshots, A)).toBeGreaterThan(0);
   });
 
   it("adopts a demo-only security with the same natural key instead of failing", async () => {
@@ -288,6 +304,8 @@ describe("syncUser", () => {
     expect(after.map((r) => r.id).sort()).toEqual(before.map((r) => r.id).sort());
     expect(await rows(s.holdings, A)).toBe(3);
     expect(await rows(s.brokerageAccounts, A)).toBe(3);
+    // A second sync on the same day replaces that day's snapshot rather than adding one.
+    expect(await rows(s.accountValueSnapshots, A)).toBe(3);
     expect(bocCalls).toBe(0);
   });
 

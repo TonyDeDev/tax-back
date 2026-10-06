@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { directionOf, formatAgo, formatDate, formatMoney, formatPercent, formatQuantity } from "./format";
+import {
+  directionOf,
+  formatAgo,
+  formatCompactMoney,
+  formatDate,
+  formatMoney,
+  formatPercent,
+  formatQuantity,
+  formatShortDate,
+} from "./format";
 
 describe("format", () => {
   it("formats CAD money and signs on request", () => {
@@ -13,6 +22,13 @@ describe("format", () => {
     expect(formatQuantity("1000.123456")).toBe("1,000.1235");
     expect(formatPercent(0.5)).toBe("50.0%");
     expect(formatDate("2025-03-03")).toBe("Mar 3, 2025");
+    expect(formatShortDate("2025-03-03")).toBe("Mar 3");
+    expect(formatShortDate("2025-03-03", true)).toBe("Mar 3, 2025");
+  });
+
+  it("formats compact axis money", () => {
+    expect(formatCompactMoney(43300.6)).toBe("$43.3K");
+    expect(formatCompactMoney(1_250_000)).toBe("$1.3M");
   });
 
   it("classifies direction", () => {

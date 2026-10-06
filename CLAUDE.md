@@ -101,7 +101,7 @@ The browser never calculates tax; it only displays saved results.
 
 ## Data Model
 
-`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `corporate_actions`, `security_preferences`, `fx_rates`, and the derived tables `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`, `position_reconciliations`.
+`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `corporate_actions`, `security_preferences`, `fx_rates`, the value history `account_value_snapshots` and `security_price_snapshots` (written by each sync, never recomputed), and the derived tables `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`, `position_reconciliations`.
 
 ## Demo Data
 

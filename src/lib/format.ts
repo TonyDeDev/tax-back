@@ -53,3 +53,24 @@ export function formatAgo(when: Date, now: Date): string {
   const days = Math.floor(hours / 24);
   return `${days} ${days === 1 ? "day" : "days"} ago`;
 }
+
+/** Axis labels: "$43K", "$1.2M". Display only. */
+export function formatCompactMoney(value: NumericInput, currency = "CAD"): string {
+  return new Intl.NumberFormat("en-CA", {
+    style: "currency",
+    currency,
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(toNumber(value));
+}
+
+/** "Oct 5" for a YYYY-MM-DD string, or "Oct 5, 2025" with `withYear`. */
+export function formatShortDate(iso: string, withYear = false): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Intl.DateTimeFormat("en-CA", {
+    month: "short",
+    day: "numeric",
+    ...(withYear ? { year: "numeric" } : {}),
+    timeZone: "UTC",
+  }).format(new Date(Date.UTC(y ?? 1970, (m ?? 1) - 1, d ?? 1)));
+}

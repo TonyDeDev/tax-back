@@ -1,13 +1,14 @@
 import "server-only";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, sql } from "drizzle-orm";
 import * as s from "@/server/db/schema";
 import { loadUserPools } from "@/server/db/pools";
 import type { AnyDb } from "@/server/db/types";
 import type { WarningView } from "@/lib/warnings";
 import { latestRates } from "@/server/fx/boc";
 import type { SyncErrorCode } from "@/server/sync/sync";
+import { accountValue, valueHoldings } from "@/server/valuation";
 import { D, type AccountType, type Dec } from "@/tax-engine";
-import { yearOf } from "@/tax-engine/dates";
+import { addDays, yearOf } from "@/tax-engine/dates";
 
 /*
  * Read queries for the Hub. Every query is scoped by `userId` first. Values are summed server side and
@@ -22,7 +23,7 @@ export interface HubAccount {
   /** Cash accounts hold no securities, so their type does not matter and is never asked for. */
   kind: "investment" | "cash";
   confirmed: boolean;
-  /** Holdings plus cash in CAD, or null when an FX rate is missing for one of its currencies. */
+  /** Holdings plus cash in CAD (unrounded, so sums match the total), or null when an FX rate is missing. */
   valueCad: string | null;
 }
 
@@ -32,6 +33,10 @@ export interface HubBrokerage {
   status: "active" | "broken";
   statusDetail: string | null;
   accounts: HubAccount[];
+  /** Sum of the accounts that have a CAD value. */
+  totalCad: string;
+  /** True when an account could not be converted to CAD, so `totalCad` leaves it out. */
+  totalIncomplete: boolean;
 }
 
 export interface HubSync {
@@ -49,7 +54,9 @@ export interface HubSummary {
   /** True when some value could not be converted to CAD, so the total leaves it out. */
   totalIncomplete: boolean;
   ytdGainCad: string;
+  /** Null when the user has not set a marginal rate, so there is no estimate. */
   estimatedTaxCad: string | null;
+  marginalRate: string | null;
   warnings: WarningView[];
   unconfirmedAccounts: number;
 }
@@ -84,7 +91,7 @@ export async function getLastSuccessfulSyncAt(db: AnyDb, userId: string): Promis
 }
 
 export async function getHubSummary(db: AnyDb, userId: string, today: string): Promise<HubSummary> {
-  const [connections, accounts, holdings, balances, [year], warnings] = await Promise.all([
+  const [connections, accounts, valuation, [year], warnings, [profile]] = await Promise.all([
     db
       .select({
         id: s.connections.id,
@@ -108,14 +115,7 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
       .from(s.brokerageAccounts)
       .where(eq(s.brokerageAccounts.userId, userId))
       .orderBy(asc(s.brokerageAccounts.name)),
-    db
-      .select({ accountId: s.holdings.accountId, currency: s.holdings.currency, marketValue: s.holdings.marketValue })
-      .from(s.holdings)
-      .where(eq(s.holdings.userId, userId)),
-    db
-      .select({ accountId: s.accountBalances.accountId, currency: s.accountBalances.currency, cash: s.accountBalances.cash })
-      .from(s.accountBalances)
-      .where(eq(s.accountBalances.userId, userId)),
+    valueHoldings(db, userId, today),
     db
       .select({ net: s.taxYearSummaries.netCapitalGainCad, tax: s.taxYearSummaries.estimatedTaxCad })
       .from(s.taxYearSummaries)
@@ -123,6 +123,7 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
     db
       .select({
         type: s.taxWarnings.type,
+        securityId: s.taxWarnings.securityId,
         symbol: s.securities.symbol,
         taxYear: s.taxWarnings.taxYear,
         amountCad: s.taxWarnings.amountCad,
@@ -133,33 +134,20 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
       .leftJoin(s.securities, eq(s.securities.id, s.taxWarnings.securityId))
       .where(eq(s.taxWarnings.userId, userId))
       .orderBy(asc(s.taxWarnings.type), asc(s.securities.symbol)),
+    db.select({ marginalRate: s.userProfiles.marginalRate }).from(s.userProfiles).where(eq(s.userProfiles.userId, userId)),
   ]);
-
-  const currencies = [...new Set([...holdings.map((h) => h.currency), ...balances.map((b) => b.currency)])];
-  const rates = await latestRates(db, currencies, today);
-
-  // Per account: the CAD value, or null once any of its amounts has no rate (a partial sum would mislead).
-  const value = new Map<string, Dec | null>();
-  const valueOf = (accountId: string): Dec | null => {
-    const v = value.get(accountId);
-    return v === undefined ? new D(0) : v;
-  };
-  const add = (accountId: string, amount: string | null, currency: string) => {
-    if (amount === null) return;
-    const current = valueOf(accountId);
-    const rate = rates.get(currency);
-    value.set(accountId, current === null || rate === undefined ? null : current.plus(new D(amount).times(rate)));
-  };
-  for (const h of holdings) add(h.accountId, h.marketValue, h.currency);
-  for (const b of balances) add(b.accountId, b.cash, b.currency);
 
   let total = new D(0);
   let totalIncomplete = false;
   const byConnection = new Map<string, HubAccount[]>();
+  const connectionTotals = new Map<string, Dec>();
   for (const a of accounts) {
-    const v = valueOf(a.id);
+    const v = accountValue(valuation, a.id);
     if (v === null) totalIncomplete = true;
-    else total = total.plus(v);
+    else {
+      total = total.plus(v);
+      connectionTotals.set(a.connectionId, (connectionTotals.get(a.connectionId) ?? new D(0)).plus(v));
+    }
     const list = byConnection.get(a.connectionId) ?? [];
     list.push({
       id: a.id,
@@ -168,7 +156,7 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
       accountType: a.accountType,
       kind: a.kind,
       confirmed: a.confirmedAt !== null,
-      valueCad: v === null ? null : v.toFixed(2),
+      valueCad: v === null ? null : v.toFixed(6),
     });
     byConnection.set(a.connectionId, list);
   }
@@ -176,11 +164,18 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
   return {
     brokerages: connections
       .map((c) => ({ ...c, accounts: byConnection.get(c.id) ?? [] }))
-      .filter((c) => c.accounts.length > 0),
+      .filter((c) => c.accounts.length > 0)
+      .map((c) => ({
+        ...c,
+        totalCad: (connectionTotals.get(c.id) ?? new D(0)).toFixed(2),
+        totalIncomplete: c.accounts.some((a) => a.valueCad === null),
+      })),
     totalValueCad: total.toFixed(2),
     totalIncomplete,
     ytdGainCad: year?.net ?? "0",
-    estimatedTaxCad: year?.tax ?? null,
+    marginalRate: profile?.marginalRate ?? null,
+    // A rate with no gains yet this year is an estimate of zero, not a missing one.
+    estimatedTaxCad: profile?.marginalRate ? (year?.tax ?? "0") : null,
     warnings,
     unconfirmedAccounts: accounts.filter((a) => a.kind === "investment" && a.confirmedAt === null).length,
   };
@@ -200,13 +195,24 @@ export interface InvestmentRow {
   marketValueCad: string | null;
   /** Pooled units' market value less their ACB. */
   unrealizedCad: string | null;
+  /** Daily CAD prices for the sparkline, oldest first; empty until two syncs have run. */
+  trend: string[];
 }
+
+/** Days of price history behind each Hub sparkline. */
+export const TREND_DAYS = 90;
 
 /**
  * One row per security held anywhere or carrying ACB, largest value first. Listings of the same shares
  * (RY on the TSX and the NYSE) are one row, under the canonical listing the ACB is pooled on.
  */
-export async function getInvestments(db: AnyDb, userId: string, today: string): Promise<InvestmentRow[]> {
+export async function getInvestments(
+  db: AnyDb,
+  userId: string,
+  today: string,
+  /** Only count units held in these accounts (a brokerage filter). ACB stays pooled across every account. */
+  accountIds?: readonly string[],
+): Promise<InvestmentRow[]> {
   const [positions, rawHoldings, { pools }] = await Promise.all([
     db
       .select({
@@ -218,20 +224,34 @@ export async function getInvestments(db: AnyDb, userId: string, today: string): 
       .from(s.acbPositions)
       .where(eq(s.acbPositions.userId, userId)),
     db
-      .select({ securityId: s.holdings.securityId, quantity: s.holdings.quantity, price: s.holdings.price, currency: s.holdings.currency })
+      .select({
+        securityId: s.holdings.securityId,
+        accountId: s.holdings.accountId,
+        quantity: s.holdings.quantity,
+        price: s.holdings.price,
+        currency: s.holdings.currency,
+      })
       .from(s.holdings)
       .innerJoin(s.brokerageAccounts, eq(s.brokerageAccounts.id, s.holdings.accountId))
       .where(and(eq(s.holdings.userId, userId), eq(s.brokerageAccounts.kind, "investment"))),
     loadUserPools(db, userId),
   ]);
-  const holdings = rawHoldings.map((h) => ({ ...h, securityId: pools.poolOf(h.securityId) }));
-  const ids = [...new Set([...positions.map((p) => p.securityId), ...holdings.map((h) => h.securityId)])];
+  const holdings = rawHoldings
+    .filter((h) => !accountIds || accountIds.includes(h.accountId))
+    .map((h) => ({ ...h, listingId: h.securityId, securityId: pools.poolOf(h.securityId) }));
+  // Filtered to a brokerage, a security shows only when that brokerage holds it.
+  const ids = accountIds
+    ? [...new Set(holdings.map((h) => h.securityId))]
+    : [...new Set([...positions.map((p) => p.securityId), ...holdings.map((h) => h.securityId)])];
   if (ids.length === 0) return [];
   const securities = await db
     .select({ id: s.securities.id, symbol: s.securities.symbol, name: s.securities.name })
     .from(s.securities)
     .where(inArray(s.securities.id, ids));
-  const rates = await latestRates(db, [...new Set(holdings.map((h) => h.currency))], today);
+  const [rates, trends] = await Promise.all([
+    latestRates(db, [...new Set(holdings.map((h) => h.currency))], today),
+    getPriceTrends(db, userId, today),
+  ]);
 
   const rows = ids.map((id) => {
     const security = securities.find((x) => x.id === id);
@@ -257,6 +277,8 @@ export async function getInvestments(db: AnyDb, userId: string, today: string): 
       acbPerShareCad: position?.acbPerShareCad ?? null,
       marketValueCad: marketValue ? marketValue.toFixed(2) : null,
       unrealizedCad: unitCad && position ? new D(position.quantity).times(unitCad).minus(position.totalAcbCad).toFixed(2) : null,
+      // The canonical listing's prices, or a held listing's when only another listing of the pool is held.
+      trend: trends.get(id) ?? held.map((h) => trends.get(h.listingId)).find((x) => x !== undefined) ?? [],
     };
   });
   return rows.sort((a, b) => Number(b.marketValueCad ?? 0) - Number(a.marketValueCad ?? 0) || (a.symbol < b.symbol ? -1 : 1));
@@ -296,4 +318,163 @@ export async function getReconciliation(db: AnyDb, userId: string): Promise<Reco
     .orderBy(asc(s.securities.symbol));
   const gaps = rows.flatMap((r) => (r.status === "match" ? [] : [{ ...r, status: r.status }]));
   return { matched: rows.length - gaps.length, total: rows.length, gaps };
+}
+
+/** Recent daily CAD prices per listing, oldest first, from the snapshots each sync writes. */
+async function getPriceTrends(db: AnyDb, userId: string, today: string): Promise<Map<string, string[]>> {
+  const rows = await db
+    .select({ securityId: s.securityPriceSnapshots.securityId, priceCad: s.securityPriceSnapshots.priceCad })
+    .from(s.securityPriceSnapshots)
+    .where(and(eq(s.securityPriceSnapshots.userId, userId), gte(s.securityPriceSnapshots.day, addDays(today, -TREND_DAYS))))
+    .orderBy(asc(s.securityPriceSnapshots.day));
+  const trends = new Map<string, string[]>();
+  for (const r of rows) {
+    const list = trends.get(r.securityId) ?? [];
+    list.push(r.priceCad);
+    trends.set(r.securityId, list);
+  }
+  return trends;
+}
+
+export interface HoldingByAccount {
+  /** The pooled security, which the security page and ACB audit trail are keyed on. */
+  securityId: string;
+  symbol: string;
+  name: string | null;
+  accountId: string;
+  accountName: string;
+  brokerageName: string;
+  accountType: AccountType;
+  quantity: string;
+  /** Null without a price or a CAD rate. */
+  marketValueCad: string | null;
+}
+
+/** One row per security per account, for the Hub's "By account" view. Largest value first. */
+export async function getHoldingsByAccount(
+  db: AnyDb,
+  userId: string,
+  today: string,
+  accountIds?: readonly string[],
+): Promise<HoldingByAccount[]> {
+  const [rows, { pools }] = await Promise.all([
+    db
+      .select({
+        securityId: s.holdings.securityId,
+        symbol: s.securities.symbol,
+        name: s.securities.name,
+        accountId: s.holdings.accountId,
+        accountName: s.brokerageAccounts.name,
+        brokerageName: s.connections.brokerageName,
+        accountType: s.brokerageAccounts.accountType,
+        quantity: s.holdings.quantity,
+        price: s.holdings.price,
+        currency: s.holdings.currency,
+      })
+      .from(s.holdings)
+      .innerJoin(s.securities, eq(s.securities.id, s.holdings.securityId))
+      .innerJoin(s.brokerageAccounts, eq(s.brokerageAccounts.id, s.holdings.accountId))
+      .innerJoin(s.connections, eq(s.connections.id, s.brokerageAccounts.connectionId))
+      .where(and(eq(s.holdings.userId, userId), eq(s.brokerageAccounts.kind, "investment"))),
+    loadUserPools(db, userId),
+  ]);
+  const kept = rows.filter((r) => !accountIds || accountIds.includes(r.accountId));
+  const rates = await latestRates(db, [...new Set(kept.map((r) => r.currency))], today);
+  return kept
+    .map((r) => {
+      const rate = rates.get(r.currency);
+      return {
+        securityId: pools.poolOf(r.securityId),
+        symbol: r.symbol,
+        name: r.name,
+        accountId: r.accountId,
+        accountName: r.accountName,
+        brokerageName: r.brokerageName,
+        accountType: r.accountType,
+        quantity: new D(r.quantity).toString(),
+        marketValueCad: r.price !== null && rate ? new D(r.quantity).times(r.price).times(rate).toFixed(2) : null,
+      };
+    })
+    .sort((a, b) => Number(b.marketValueCad ?? 0) - Number(a.marketValueCad ?? 0) || (a.symbol < b.symbol ? -1 : 1));
+}
+
+export interface ValuePoint {
+  day: string;
+  valueCad: string;
+}
+
+/** Total value per snapshot day, oldest first, optionally for some accounts only. */
+export async function getValueHistory(db: AnyDb, userId: string, accountIds?: readonly string[]): Promise<ValuePoint[]> {
+  if (accountIds && accountIds.length === 0) return [];
+  const rows = await db
+    .select({ day: s.accountValueSnapshots.day, valueCad: sql<string>`sum(${s.accountValueSnapshots.valueCad})` })
+    .from(s.accountValueSnapshots)
+    .where(
+      and(
+        eq(s.accountValueSnapshots.userId, userId),
+        accountIds ? inArray(s.accountValueSnapshots.accountId, [...accountIds]) : undefined,
+      ),
+    )
+    .groupBy(s.accountValueSnapshots.day)
+    .orderBy(asc(s.accountValueSnapshots.day));
+  return rows.map((r) => ({ day: r.day, valueCad: new D(r.valueCad).toFixed(2) }));
+}
+
+export interface ValueChange {
+  /** The latest snapshot less the one before it. */
+  changeCad: string;
+  /** The earlier snapshot's day, which the change is measured from. */
+  sinceDay: string;
+}
+
+/** The change between the last two snapshots, or null with fewer than two. */
+export function latestChange(history: readonly ValuePoint[]): ValueChange | null {
+  const last = history.at(-1);
+  const previous = history.at(-2);
+  if (!last || !previous) return null;
+  return { changeCad: new D(last.valueCad).minus(previous.valueCad).toFixed(2), sinceDay: previous.day };
+}
+
+export type AllocationKey = "non_registered" | "tfsa" | "rrsp" | "other_registered" | "cash";
+
+export interface AllocationSlice {
+  key: AllocationKey;
+  label: string;
+  valueCad: string;
+  /** Share of the total, 0 to 1, as a decimal string. */
+  share: string;
+}
+
+const ALLOCATION_LABELS: Record<AllocationKey, string> = {
+  non_registered: "Non-registered",
+  tfsa: "TFSA",
+  rrsp: "RRSP",
+  other_registered: "Other registered",
+  cash: "Cash",
+};
+
+/**
+ * Value by account type. Cash accounts are their own slice; uninvested cash inside a TFSA stays TFSA.
+ * Every type the user has an account in is listed, even at zero, so the mix reads honestly.
+ */
+export function allocationByType(brokerages: readonly HubBrokerage[]): AllocationSlice[] {
+  const sums = new Map<AllocationKey, Dec>();
+  for (const a of brokerages.flatMap((b) => b.accounts)) {
+    const key: AllocationKey =
+      a.kind === "cash"
+        ? "cash"
+        : a.accountType === "non_registered" || a.accountType === "tfsa" || a.accountType === "rrsp"
+          ? a.accountType
+          : "other_registered";
+    sums.set(key, (sums.get(key) ?? new D(0)).plus(a.valueCad ?? 0));
+  }
+  const total = [...sums.values()].reduce((x, y) => x.plus(y), new D(0));
+  return (Object.keys(ALLOCATION_LABELS) as AllocationKey[])
+    .filter((key) => sums.has(key))
+    .map((key) => ({
+      key,
+      label: ALLOCATION_LABELS[key],
+      valueCad: sums.get(key)!.toFixed(2),
+      share: total.isZero() ? "0" : sums.get(key)!.div(total).toFixed(6),
+    }));
 }

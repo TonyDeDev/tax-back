@@ -21,6 +21,7 @@ import {
 } from "@/server/snaptrade/map";
 import type { SnapTradeAuthorization } from "@/server/snaptrade/schemas";
 import { SnapTradeReauthRequiredError, withSnapTrade } from "@/server/snaptrade/token";
+import { writeValueSnapshots } from "@/server/valuation";
 
 /*
  * One sync: fetch everything from SnapTrade, upsert it by SnapTrade id (safe to repeat), fill FX rates,
@@ -414,6 +415,7 @@ export async function syncUser(
     const fx = await syncFxRates(db, currencies, range?.first ?? today, today);
 
     await recomputeUser(db, userId, today);
+    await writeValueSnapshots(db, userId, today);
 
     const finishedAt = new Date();
     await db

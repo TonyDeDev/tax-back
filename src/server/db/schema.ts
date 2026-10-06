@@ -448,6 +448,53 @@ export const fxRates = pgTable(
   ],
 );
 
+// ===== Value history (written once per day per sync, never recomputed) =====
+
+/**
+ * Each account's holdings plus cash in CAD, as of a sync on `day` (Toronto). The Hub's value-over-time
+ * chart and "since yesterday" delta read these; brokers do not report past values, so history starts at
+ * the first sync. A later sync on the same day replaces the row.
+ */
+export const accountValueSnapshots = pgTable(
+  "account_value_snapshots",
+  {
+    accountId: uuid("account_id").notNull(),
+    userId: text("user_id").notNull(),
+    day: day("day").notNull(),
+    valueCad: money("value_cad").notNull(),
+  },
+  (t) => [
+    primaryKey({ name: "account_value_snapshots_pkey", columns: [t.accountId, t.day] }),
+    foreignKey({
+      name: "account_value_snapshots_account_fkey",
+      columns: [t.accountId, t.userId],
+      foreignColumns: [brokerageAccounts.id, brokerageAccounts.userId],
+    }).onDelete("cascade"),
+    index("idx_account_value_snapshots_user_day").on(t.userId, t.day),
+  ],
+);
+
+/**
+ * The broker's price for each held security, in CAD, as of a sync on `day`. Per user rather than global:
+ * the demo's illustrative prices must never reach real users. Drives the Hub's per-security sparklines.
+ */
+export const securityPriceSnapshots = pgTable(
+  "security_price_snapshots",
+  {
+    userId: userRef(),
+    securityId: uuid("security_id")
+      .notNull()
+      .references(() => securities.id, { onDelete: "cascade" }),
+    day: day("day").notNull(),
+    priceCad: money("price_cad").notNull(),
+  },
+  (t) => [
+    primaryKey({ name: "security_price_snapshots_pkey", columns: [t.userId, t.securityId, t.day] }),
+    index("idx_security_price_snapshots_security").on(t.securityId),
+    check("security_price_snapshots_price_check", sql`price_cad >= 0`),
+  ],
+);
+
 // ===== Operational =====
 
 export const syncRuns = pgTable(

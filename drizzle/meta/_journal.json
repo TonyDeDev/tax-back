@@ -43,6 +43,13 @@
       "when": 1791323793019,
       "tag": "0005_interlisted_us_retirement",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791329220193,
+      "tag": "0006_value_snapshots",
+      "breakpoints": true
     }
   ]
 }
