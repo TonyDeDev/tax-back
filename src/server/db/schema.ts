@@ -50,7 +50,7 @@ const currencyCheck = (name: string, column: string) => check(name, sql.raw(`${c
 const inList = (column: string, values: readonly string[]) =>
   sql.raw(`${column} IN (${values.map((v) => `'${v}'`).join(", ")})`);
 
-export const ACCOUNT_TYPES = ["non_registered", "tfsa", "rrsp", "fhsa", "resp", "rrif", "lira"] as const;
+export const ACCOUNT_TYPES = ["non_registered", "tfsa", "rrsp", "fhsa", "resp", "rrif", "lira", "us_retirement"] as const;
 export const TRANSACTION_KINDS = [
   "buy",
   "sell",
@@ -61,6 +61,7 @@ export const TRANSACTION_KINDS = [
   "fee",
   "transfer_in",
   "transfer_out",
+  "stock_dividend",
 ] as const;
 export const DIVIDEND_CLASSES = ["eligible", "non_eligible", "foreign"] as const;
 /** `cash` accounts (chequing, Wealthsimple Cash) hold only cash, so they count toward value but never toward gains. */
@@ -69,12 +70,38 @@ export const SECURITY_TYPES = ["equity", "etf", "mutual_fund", "bond", "option",
 export const CONNECTION_STATUSES = ["active", "broken"] as const;
 export const SYNC_TRIGGERS = ["connect", "manual", "cron", "demo_reset"] as const;
 export const SYNC_STATUSES = ["running", "succeeded", "failed"] as const;
-export const ACB_EVENT_KINDS = [...TRANSACTION_KINDS, "opening", "superficial_adjustment"] as const;
+/** Security-wide events the user enters, since SnapTrade does not report them in a usable form. */
+export const CORPORATE_ACTION_KINDS = ["spinoff", "merger"] as const;
+export const ACB_EVENT_KINDS = [...TRANSACTION_KINDS, ...CORPORATE_ACTION_KINDS, "opening", "superficial_adjustment"] as const;
+/** Mirrors the engine's `AcbRule`: why each audit trail step changed the pool. */
+export const ACB_RULES = [
+  "opening_balance",
+  "buy_cost_plus_commission",
+  "drip_reinvested",
+  "stock_dividend_value",
+  "sell_average_cost",
+  "roc_reduces_acb",
+  "roc_floors_at_zero",
+  "split_quantity_only",
+  "superficial_loss_added",
+  "transfer_to_registered_deemed_sale",
+  "transfer_from_registered_at_fmv",
+  "spinoff_acb_to_child",
+  "spinoff_acb_from_parent",
+  "merger_rollover_out",
+  "merger_rollover_in",
+] as const;
+export const GAIN_KINDS = ["sale", "roc_excess", "deemed_disposition", "merger_cash"] as const;
+export const RECONCILIATION_STATUSES = ["match", "broker_has_more", "ledger_has_more"] as const;
 export const WARNING_TYPES = [
   "opening_balance_needed",
   "superficial_loss_lost_forever",
   "superficial_loss_pending",
+  /** No longer produced; kept so rows written before transfers were supported still load. */
   "unsupported_transfer",
+  "transfer_unmatched",
+  "transfer_value_missing",
+  "registered_transfer_loss_denied",
   "roc_without_position",
   "split_reported_twice",
   "assumed_year_config",
@@ -181,11 +208,17 @@ export const securities = pgTable(
     securityType: text("security_type", { enum: SECURITY_TYPES }).notNull().default("equity"),
     /** Issuer country; drives the default dividend class. */
     country: text("country"),
+    /**
+     * Bloomberg share-class FIGI: the same for every listing of the same shares (RY on the TSX and the
+     * NYSE). Listings that share it are pooled as identical property. Null when SnapTrade has none.
+     */
+    figiShareClass: text("figi_share_class"),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
   (t) => [
     unique("securities_symbol_exchange_currency_key").on(t.symbol, t.exchange, t.currency).nullsNotDistinct(),
+    index("idx_securities_figi_share_class").on(t.figiShareClass),
     currencyCheck("securities_currency_check", "currency"),
     check("securities_security_type_check", inList("security_type", SECURITY_TYPES)),
   ],
@@ -244,7 +277,10 @@ export const transactions = pgTable(
     check("transactions_split_needs_ratio", sql`kind <> 'split' OR split_ratio IS NOT NULL`),
     check("transactions_dividend_needs_class", sql`kind <> 'dividend' OR dividend_class IS NOT NULL`),
     check("transactions_needs_security", sql`kind = 'fee' OR security_id IS NOT NULL`),
-    check("transactions_trade_needs_quantity", sql`kind NOT IN ('buy', 'sell', 'drip') OR quantity > 0`),
+    check(
+      "transactions_trade_needs_quantity",
+      sql`kind NOT IN ('buy', 'sell', 'drip', 'stock_dividend', 'transfer_in', 'transfer_out') OR quantity > 0`,
+    ),
   ],
 );
 
@@ -323,6 +359,74 @@ export const manualAdjustments = pgTable(
     index("idx_manual_adjustments_security").on(t.securityId),
     check("manual_adjustments_quantity_check", sql`quantity >= 0`),
     check("manual_adjustments_acb_check", sql`acb_cad >= 0`),
+  ],
+);
+
+/**
+ * A spinoff or merger the user records. It maps to one security-wide engine entry, applied to every
+ * account holding `securityId`. Fair market values are per share, in `currency`, just after the action.
+ */
+export const corporateActions = pgTable(
+  "corporate_actions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userRef(),
+    kind: text("kind", { enum: CORPORATE_ACTION_KINDS }).notNull(),
+    securityId: uuid("security_id")
+      .notNull()
+      .references(() => securities.id, { onDelete: "restrict" }),
+    targetSecurityId: uuid("target_security_id")
+      .notNull()
+      .references(() => securities.id, { onDelete: "restrict" }),
+    effectiveDate: day("effective_date").notNull(),
+    currency: text("currency").notNull(),
+    /** New shares per old share. */
+    ratio: ratio("ratio").notNull(),
+    oldFmv: money("old_fmv"),
+    newFmv: money("new_fmv"),
+    /** Merger only: cash received per old share. */
+    cashPerShare: money("cash_per_share").notNull().default("0"),
+    note: text("note"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique("corporate_actions_id_user_id_key").on(t.id, t.userId),
+    index("idx_corporate_actions_user").on(t.userId),
+    index("idx_corporate_actions_security").on(t.securityId),
+    index("idx_corporate_actions_target").on(t.targetSecurityId),
+    currencyCheck("corporate_actions_currency_check", "currency"),
+    check("corporate_actions_kind_check", inList("kind", CORPORATE_ACTION_KINDS)),
+    check("corporate_actions_ratio_check", sql`ratio > 0`),
+    check("corporate_actions_cash_check", sql`cash_per_share >= 0`),
+    check("corporate_actions_distinct_check", sql`security_id <> target_security_id`),
+    check("corporate_actions_spinoff_fmv_check", sql`kind <> 'spinoff' OR (old_fmv > 0 AND new_fmv > 0)`),
+    check("corporate_actions_merger_fmv_check", sql`kind <> 'merger' OR cash_per_share = 0 OR new_fmv > 0`),
+  ],
+);
+
+/**
+ * Per-user choices about a listing, for when the automatic answer is wrong.
+ * `poolSecurityId`: pool this listing with that one as identical property; set to the listing's own id to
+ * keep it separate even when the FIGI says otherwise; null to follow the FIGI.
+ * `dividendClass`: the class its dividends get; null for the automatic one (from the issuer's listing).
+ */
+export const securityPreferences = pgTable(
+  "security_preferences",
+  {
+    userId: userRef(),
+    securityId: uuid("security_id")
+      .notNull()
+      .references(() => securities.id, { onDelete: "cascade" }),
+    poolSecurityId: uuid("pool_security_id").references(() => securities.id, { onDelete: "cascade" }),
+    dividendClass: text("dividend_class", { enum: DIVIDEND_CLASSES }),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: "security_preferences_pkey", columns: [t.userId, t.securityId] }),
+    index("idx_security_preferences_security").on(t.securityId),
+    index("idx_security_preferences_pool").on(t.poolSecurityId),
+    check("security_preferences_dividend_class_check", inList("dividend_class", DIVIDEND_CLASSES)),
   ],
 );
 
@@ -418,8 +522,12 @@ export const acbEvents = pgTable(
     seq: integer("seq").notNull(),
     transactionId: uuid("transaction_id"),
     manualAdjustmentId: uuid("manual_adjustment_id"),
+    corporateActionId: uuid("corporate_action_id"),
     eventDate: day("event_date").notNull(),
     kind: text("kind", { enum: ACB_EVENT_KINDS }).notNull(),
+    rule: text("rule", { enum: ACB_RULES }).notNull(),
+    /** CAD per unit of the source currency used for this step; null when no conversion happened. */
+    fxRate: ratio("fx_rate"),
     quantityDelta: quantity("quantity_delta").notNull(),
     acbDeltaCad: money("acb_delta_cad").notNull(),
     poolQuantityAfter: quantity("pool_quantity_after").notNull(),
@@ -435,9 +543,19 @@ export const acbEvents = pgTable(
     }).onDelete("cascade"),
     index("idx_acb_events_security").on(t.securityId),
     index("idx_acb_events_transaction").on(t.transactionId),
+    foreignKey({
+      name: "acb_events_corporate_action_fkey",
+      columns: [t.corporateActionId, t.userId],
+      foreignColumns: [corporateActions.id, corporateActions.userId],
+    }).onDelete("cascade"),
     index("idx_acb_events_manual").on(t.manualAdjustmentId),
+    index("idx_acb_events_corporate_action").on(t.corporateActionId),
     check("acb_events_kind_check", inList("kind", ACB_EVENT_KINDS)),
-    check("acb_events_one_source", sql`num_nonnulls(transaction_id, manual_adjustment_id) = 1`),
+    check("acb_events_rule_check", inList("rule", ACB_RULES)),
+    check(
+      "acb_events_one_source",
+      sql`num_nonnulls(transaction_id, manual_adjustment_id, corporate_action_id) = 1`,
+    ),
   ],
 );
 
@@ -446,12 +564,15 @@ export const realizedGains = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     userId: userRef(),
-    transactionId: uuid("transaction_id").notNull(),
+    /** The sale, return of capital, or transfer; null for the cash part of a merger. */
+    transactionId: uuid("transaction_id"),
+    corporateActionId: uuid("corporate_action_id"),
     securityId: uuid("security_id")
       .notNull()
       .references(() => securities.id, { onDelete: "cascade" }),
-    accountId: uuid("account_id").notNull(),
-    kind: text("kind", { enum: ["sale", "roc_excess"] }).notNull(),
+    /** Null for a merger, which happens to the security rather than in one account. */
+    accountId: uuid("account_id"),
+    kind: text("kind", { enum: GAIN_KINDS }).notNull(),
     dispositionDate: day("disposition_date").notNull(),
     taxYear: smallint("tax_year").notNull(),
     quantity: quantity("quantity").notNull(),
@@ -470,10 +591,17 @@ export const realizedGains = pgTable(
     unique("realized_gains_transaction_kind_key").on(t.transactionId, t.kind),
     ownTransaction("realized_gains_transaction_fkey", t.transactionId, t.userId),
     ownAccount("realized_gains_account_fkey", t.accountId, t.userId),
+    foreignKey({
+      name: "realized_gains_corporate_action_fkey",
+      columns: [t.corporateActionId, t.userId],
+      foreignColumns: [corporateActions.id, corporateActions.userId],
+    }).onDelete("cascade"),
     index("idx_realized_gains_user_year").on(t.userId, t.taxYear, t.dispositionDate),
     index("idx_realized_gains_security").on(t.securityId),
     index("idx_realized_gains_account").on(t.accountId),
-    check("realized_gains_kind_check", sql`kind IN ('sale', 'roc_excess')`),
+    index("idx_realized_gains_corporate_action").on(t.corporateActionId),
+    check("realized_gains_kind_check", inList("kind", GAIN_KINDS)),
+    check("realized_gains_one_source", sql`num_nonnulls(transaction_id, corporate_action_id) = 1`),
   ],
 );
 
@@ -647,5 +775,31 @@ export const taxWarnings = pgTable(
       sql`CASE WHEN type = 'assumed_year_config' THEN tax_year IS NOT NULL
                ELSE security_id IS NOT NULL AND transaction_id IS NOT NULL END`,
     ),
+  ],
+);
+
+/**
+ * Ledger vs broker, per security: the pooled non-registered position (`account_id` null) and each
+ * registered account on its own. A gap asks the user for an opening balance or explains what is missing.
+ */
+export const positionReconciliations = pgTable(
+  "position_reconciliations",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userRef(),
+    securityId: uuid("security_id")
+      .notNull()
+      .references(() => securities.id, { onDelete: "cascade" }),
+    accountId: uuid("account_id"),
+    ledgerQuantity: quantity("ledger_quantity").notNull(),
+    brokerQuantity: quantity("broker_quantity").notNull(),
+    status: text("status", { enum: RECONCILIATION_STATUSES }).notNull(),
+  },
+  (t) => [
+    unique("position_reconciliations_key").on(t.userId, t.securityId, t.accountId).nullsNotDistinct(),
+    ownAccount("position_reconciliations_account_fkey", t.accountId, t.userId),
+    index("idx_position_reconciliations_security").on(t.securityId),
+    index("idx_position_reconciliations_account").on(t.accountId),
+    check("position_reconciliations_status_check", inList("status", RECONCILIATION_STATUSES)),
   ],
 );

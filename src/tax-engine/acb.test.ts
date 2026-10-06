@@ -121,9 +121,10 @@ describe("pooled ACB", () => {
     expect(r.positions).toHaveLength(0);
   });
 
-  it("flags unsupported transfers", () => {
-    const r = run([entry({ kind: "transfer_in", date: "2025-01-02", qty: 5 })]);
-    expect(r.warnings.map((w) => w.type)).toContain("unsupported_transfer");
+  it("flags a transfer in from an account TaxBack cannot see, without inventing a cost", () => {
+    const r = run([entry({ kind: "transfer_in", date: "2025-01-02", qty: 5, price: 10 })]);
+    expect(r.warnings.map((w) => w.type)).toContain("transfer_unmatched");
+    expect(r.positions).toHaveLength(0);
   });
 
   it("rejects an invalid ledger", () => {

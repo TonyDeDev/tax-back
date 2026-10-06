@@ -21,31 +21,43 @@ export function buildHeldTimeline(sorted: readonly LedgerEntry[]): HeldTimeline 
   const points = new Map<string, Point[]>();
   // These totals span every account, so a split reported by each of them must only count once.
   const { duplicateIds } = dedupeSplits(sorted);
+  const set = (securityId: string, date: string, total: Dec) => {
+    totals.set(securityId, total);
+    const list = points.get(securityId) ?? [];
+    list.push({ date, total });
+    points.set(securityId, list);
+  };
   for (const e of sorted) {
     const current = totals.get(e.securityId) ?? ZERO;
-    let next: Dec;
     switch (e.kind) {
       case "opening":
       case "buy":
       case "drip":
+      case "stock_dividend":
       case "transfer_in":
-        next = current.plus(e.quantity);
+        set(e.securityId, e.settlementDate, current.plus(e.quantity));
         break;
       case "sell":
       case "transfer_out":
-        next = current.minus(e.quantity);
+        set(e.securityId, e.settlementDate, current.minus(e.quantity));
         break;
       case "split":
         if (duplicateIds.has(e.id)) continue;
-        next = current.times(e.splitRatio ?? 1);
+        set(e.securityId, e.settlementDate, current.times(e.splitRatio ?? 1));
         break;
+      // Corporate actions apply to every account at once, registered ones included.
+      case "spinoff":
+      case "merger": {
+        if (!e.target) continue;
+        const received = D.max(current, ZERO).times(e.splitRatio ?? 0);
+        const targetTotal = totals.get(e.target.securityId) ?? ZERO;
+        set(e.target.securityId, e.settlementDate, targetTotal.plus(received));
+        if (e.kind === "merger") set(e.securityId, e.settlementDate, ZERO);
+        break;
+      }
       default:
         continue;
     }
-    totals.set(e.securityId, next);
-    const list = points.get(e.securityId) ?? [];
-    list.push({ date: e.settlementDate, total: next });
-    points.set(e.securityId, list);
   }
   return {
     heldAt(securityId, date) {

@@ -9,6 +9,7 @@ export const ACCOUNT_TYPE_LABELS: Record<AccountType, string> = {
   resp: "RESP",
   rrif: "RRIF",
   lira: "LIRA / LIF",
+  us_retirement: "U.S. retirement (IRA, 401(k))",
 };
 
 export const ACCOUNT_TYPE_OPTIONS = Object.entries(ACCOUNT_TYPE_LABELS) as [AccountType, string][];

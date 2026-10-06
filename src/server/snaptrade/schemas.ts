@@ -44,6 +44,12 @@ export const authorizationSchema = z.object({
 });
 export type SnapTradeAuthorization = z.infer<typeof authorizationSchema>;
 
+/**
+ * FIGI metadata, when SnapTrade has it. `figi_share_class` is the same for every listing of the same
+ * shares (RY on the TSX and on the NYSE), which is how identical property across listings is pooled.
+ */
+const figiSchema = z.object({ figi_code: z.string().nullish(), figi_share_class: z.string().nullish() }).nullish();
+
 export const positionSchema = z.object({
   instrument: z.object({
     kind: z.string(),
@@ -53,6 +59,7 @@ export const positionSchema = z.object({
     description: z.string().nullish(),
     currency: z.string().nullish(),
     exchange: z.string().nullish(),
+    figi_instrument: figiSchema,
   }),
   units: numeric,
   price: numeric.nullish(),
@@ -83,6 +90,7 @@ export const symbolSchema = z.object({
   currency: currencyRef,
   exchange: z.object({ code: z.string().nullish(), mic_code: z.string().nullish() }).nullish(),
   type: z.object({ code: z.string().nullish() }).nullish(),
+  figi_instrument: figiSchema,
 });
 export type SnapTradeSymbol = z.infer<typeof symbolSchema>;
 

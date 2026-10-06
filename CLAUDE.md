@@ -83,28 +83,38 @@ Every rule has Vitest tests from worked examples.
   Reported in the year of the settlement date.
 - **Superficial loss:** loss is denied if the same security is bought within 30 days before or after the sale (in any account, including TFSA/RRSP) and still held 30 days after.
   The denied loss is added to the new shares' ACB, or lost forever if they are in a registered account (warn clearly).
-- **Registered accounts** (TFSA, RRSP, FHSA, RESP, RRIF, LIRA) are excluded from gains and income, but included in superficial loss checks.
+- **Registered accounts** (TFSA, RRSP, FHSA, RESP, RRIF, LIRA, and U.S. retirement accounts such as IRAs and 401(k)s) are excluded from gains and income, but included in superficial loss checks.
+- **Identical property across listings:** RY on the TSX and RY on the NYSE are one pool, joined by share-class FIGI or a user link (`src/server/db/pools.ts`). Dividend class follows the issuer, not the listing.
   Users confirm each account's type.
 - **Foreign currency:** convert to CAD at the Bank of Canada rate for the trade date (previous business day if none).
 - **Missing history:** if a position's history is incomplete, ask the user for an opening quantity and ACB.
 - **Dividends:** split into eligible, non-eligible, and foreign.
+- **Transfers in kind:** paired across accounts. Non-registered to non-registered is no event; into a registered account is a deemed sale at fair market value with any loss denied for good; out of one is an acquisition at fair market value.
+- **Corporate actions:** stock dividends from SnapTrade; spinoffs (ACB split by fair market value) and mergers (rollover, cash part is a disposition) entered by the user.
+- **Audit trail:** every ACB event records the rule applied and the FX rate used.
+- **Reconciliation:** the replayed ledger is compared with broker positions (pooled non-registered per security, each registered account on its own).
+- **Sale preview:** "what if I sell?" runs the same engine with one hypothetical sale today.
+
+`docs/tax-rules.md` lists every rule and its known limits.
 
 The browser never calculates tax; it only displays saved results.
 
 ## Data Model
 
-`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `fx_rates`, and the derived tables `acb_positions`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`.
+`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `corporate_actions`, `security_preferences`, `fx_rates`, and the derived tables `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`, `position_reconciliations`.
 
 ## Demo Data
 
-`scripts/seed-demo.ts` (`pnpm db:seed`) creates a demo user with 3 brokerages, non-registered + TFSA + RRSP accounts, CAD and USD stocks, the same stock at two brokerages (pooled ACB), a superficial loss caused by a TFSA buy, dividends, and a harvesting opportunity, across 3 tax years.
-The daily cron resets it.
+`src/server/demo/seed.ts` (run by `pnpm db:seed`) creates a demo user with 3 brokerages, non-registered + TFSA + RRSP + Roth IRA accounts, CAD and USD stocks, the same stock at two brokerages (pooled ACB), a TSX/NYSE interlisted stock, a superficial loss caused by a TFSA buy, a deemed sale into the TFSA, dividends, a harvesting opportunity, and one reconciliation gap, across 3 tax years.
+Dates are relative to today, and exchange rates are real Bank of Canada rates (never invented: `fx_rates` is shared).
+The daily cron resets it, and the Hub seeds it on the first demo visit if it is missing.
 
 ## Pages
 
 - **Landing** (`/`): one-screen pitch, "Try the demo", "Sign in".
 - **Hub** (`/hub`): total value, YTD gains, estimated tax, alerts, accounts grouped by brokerage, investments table (pooled by default, per-account toggle), allocation charts.
-  Detail pages for each account and each security (with ACB breakdown).
+  Ledger vs broker reconciliation ("ledger matches broker positions: N%").
+  Detail pages for each account and each security (ACB audit trail, "what if I sell?", opening balance, corporate actions).
 - **Tax Center** (`/tax/[year]`): realized gains (Schedule 3 layout), superficial losses, dividends, harvesting suggestions with the 30-day window, CSV export.
 - **Settings:** theme, connected brokerages (link to the SnapTrade Dashboard), delete my data (revokes the SnapTrade refresh token first).
 

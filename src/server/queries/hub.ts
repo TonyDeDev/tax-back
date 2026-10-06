@@ -1,6 +1,7 @@
 import "server-only";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import * as s from "@/server/db/schema";
+import { loadUserPools } from "@/server/db/pools";
 import type { AnyDb } from "@/server/db/types";
 import type { WarningView } from "@/lib/warnings";
 import { latestRates } from "@/server/fx/boc";
@@ -183,4 +184,116 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
     warnings,
     unconfirmedAccounts: accounts.filter((a) => a.kind === "investment" && a.confirmedAt === null).length,
   };
+}
+
+export interface InvestmentRow {
+  securityId: string;
+  symbol: string;
+  name: string | null;
+  /** Units the brokers report across every account, registered included. */
+  brokerQuantity: string;
+  /** The pooled non-registered position the ACB applies to. */
+  pooledQuantity: string;
+  totalAcbCad: string | null;
+  acbPerShareCad: string | null;
+  /** Every account's units at the latest price, or null without a price or rate. */
+  marketValueCad: string | null;
+  /** Pooled units' market value less their ACB. */
+  unrealizedCad: string | null;
+}
+
+/**
+ * One row per security held anywhere or carrying ACB, largest value first. Listings of the same shares
+ * (RY on the TSX and the NYSE) are one row, under the canonical listing the ACB is pooled on.
+ */
+export async function getInvestments(db: AnyDb, userId: string, today: string): Promise<InvestmentRow[]> {
+  const [positions, rawHoldings, { pools }] = await Promise.all([
+    db
+      .select({
+        securityId: s.acbPositions.securityId,
+        quantity: s.acbPositions.quantity,
+        totalAcbCad: s.acbPositions.totalAcbCad,
+        acbPerShareCad: s.acbPositions.acbPerShareCad,
+      })
+      .from(s.acbPositions)
+      .where(eq(s.acbPositions.userId, userId)),
+    db
+      .select({ securityId: s.holdings.securityId, quantity: s.holdings.quantity, price: s.holdings.price, currency: s.holdings.currency })
+      .from(s.holdings)
+      .innerJoin(s.brokerageAccounts, eq(s.brokerageAccounts.id, s.holdings.accountId))
+      .where(and(eq(s.holdings.userId, userId), eq(s.brokerageAccounts.kind, "investment"))),
+    loadUserPools(db, userId),
+  ]);
+  const holdings = rawHoldings.map((h) => ({ ...h, securityId: pools.poolOf(h.securityId) }));
+  const ids = [...new Set([...positions.map((p) => p.securityId), ...holdings.map((h) => h.securityId)])];
+  if (ids.length === 0) return [];
+  const securities = await db
+    .select({ id: s.securities.id, symbol: s.securities.symbol, name: s.securities.name })
+    .from(s.securities)
+    .where(inArray(s.securities.id, ids));
+  const rates = await latestRates(db, [...new Set(holdings.map((h) => h.currency))], today);
+
+  const rows = ids.map((id) => {
+    const security = securities.find((x) => x.id === id);
+    const position = positions.find((p) => p.securityId === id);
+    const held = holdings.filter((h) => h.securityId === id);
+    const brokerQuantity = held.reduce((sum, h) => sum.plus(h.quantity), new D(0));
+    // Value each listing at its own price and currency; pooled listings trade at slightly different prices.
+    let marketValue: Dec | null = new D(0);
+    for (const h of held) {
+      const rate = rates.get(h.currency);
+      marketValue = marketValue && h.price !== null && rate ? marketValue.plus(new D(h.quantity).times(h.price).times(rate)) : null;
+    }
+    if (held.length === 0) marketValue = null;
+    const priced = held.find((h) => h.price !== null && rates.has(h.currency));
+    const unitCad = priced ? new D(priced.price!).times(rates.get(priced.currency)!) : null;
+    return {
+      securityId: id,
+      symbol: security?.symbol ?? "?",
+      name: security?.name ?? null,
+      brokerQuantity: brokerQuantity.toString(),
+      pooledQuantity: position?.quantity ?? "0",
+      totalAcbCad: position?.totalAcbCad ?? null,
+      acbPerShareCad: position?.acbPerShareCad ?? null,
+      marketValueCad: marketValue ? marketValue.toFixed(2) : null,
+      unrealizedCad: unitCad && position ? new D(position.quantity).times(unitCad).minus(position.totalAcbCad).toFixed(2) : null,
+    };
+  });
+  return rows.sort((a, b) => Number(b.marketValueCad ?? 0) - Number(a.marketValueCad ?? 0) || (a.symbol < b.symbol ? -1 : 1));
+}
+
+export interface ReconciliationGap {
+  securityId: string;
+  symbol: string;
+  /** Null for the pooled non-registered position. */
+  accountName: string | null;
+  ledgerQuantity: string;
+  brokerQuantity: string;
+  status: "broker_has_more" | "ledger_has_more";
+}
+
+export interface ReconciliationSummary {
+  matched: number;
+  total: number;
+  gaps: ReconciliationGap[];
+}
+
+/** "Ledger matches broker positions": how many positions agree, and the ones that do not. */
+export async function getReconciliation(db: AnyDb, userId: string): Promise<ReconciliationSummary> {
+  const rows = await db
+    .select({
+      securityId: s.positionReconciliations.securityId,
+      symbol: s.securities.symbol,
+      accountName: s.brokerageAccounts.name,
+      ledgerQuantity: s.positionReconciliations.ledgerQuantity,
+      brokerQuantity: s.positionReconciliations.brokerQuantity,
+      status: s.positionReconciliations.status,
+    })
+    .from(s.positionReconciliations)
+    .innerJoin(s.securities, eq(s.securities.id, s.positionReconciliations.securityId))
+    .leftJoin(s.brokerageAccounts, eq(s.brokerageAccounts.id, s.positionReconciliations.accountId))
+    .where(eq(s.positionReconciliations.userId, userId))
+    .orderBy(asc(s.securities.symbol));
+  const gaps = rows.flatMap((r) => (r.status === "match" ? [] : [{ ...r, status: r.status }]));
+  return { matched: rows.length - gaps.length, total: rows.length, gaps };
 }

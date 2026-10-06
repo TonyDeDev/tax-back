@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { D } from "@/tax-engine";
-import { fxLookupFrom, toDerivedRows, toLedger } from "./ledger";
+import { fxLookupFrom, toCorporateActions, toDerivedRows, toLedger } from "./ledger";
 import type * as s from "./schema";
 
 type TransactionRow = typeof s.transactions.$inferSelect;
@@ -75,22 +75,28 @@ describe("toLedger", () => {
 });
 
 describe("toDerivedRows", () => {
+  const zero = new D(0);
+  const empty = {
+    positions: [],
+    gains: [],
+    superficialLosses: [],
+    income: [],
+    harvest: [],
+    years: [],
+    warnings: [],
+    acbEvents: [],
+    reconciliation: { rows: [], matched: 0, total: 0 },
+  };
+
   it("points opening ACB events at the manual adjustment and numbers events per security", () => {
-    const zero = new D(0);
     const rows = toDerivedRows(
       "u1",
       {
-        positions: [],
-        gains: [],
-        superficialLosses: [],
-        income: [],
-        harvest: [],
-        years: [],
-        warnings: [],
+        ...empty,
         acbEvents: [
-          { entryId: "opening:sec1", securityId: "sec1", date: "2025-01-01", kind: "opening", quantityDelta: new D(5), acbDeltaCad: new D(50), poolQuantityAfter: new D(5), poolAcbAfterCad: new D(50) },
-          { entryId: "t1", securityId: "sec1", date: "2025-01-03", kind: "buy", quantityDelta: new D(10), acbDeltaCad: new D(128), poolQuantityAfter: new D(15), poolAcbAfterCad: new D(178) },
-          { entryId: "t2", securityId: "sec2", date: "2025-01-03", kind: "buy", quantityDelta: zero, acbDeltaCad: zero, poolQuantityAfter: zero, poolAcbAfterCad: zero },
+          { entryId: "opening:sec1", securityId: "sec1", date: "2025-01-01", kind: "opening", rule: "opening_balance", fxRate: null, quantityDelta: new D(5), acbDeltaCad: new D(50), poolQuantityAfter: new D(5), poolAcbAfterCad: new D(50) },
+          { entryId: "t1", securityId: "sec1", date: "2025-01-03", kind: "buy", rule: "buy_cost_plus_commission", fxRate: new D("1.43"), quantityDelta: new D(10), acbDeltaCad: new D(128), poolQuantityAfter: new D(15), poolAcbAfterCad: new D(178) },
+          { entryId: "t2", securityId: "sec2", date: "2025-01-03", kind: "buy", rule: "buy_cost_plus_commission", fxRate: new D(1), quantityDelta: zero, acbDeltaCad: zero, poolQuantityAfter: zero, poolAcbAfterCad: zero },
         ],
       },
       new Map([["sec1", "adj1"]]),
@@ -102,5 +108,85 @@ describe("toDerivedRows", () => {
       ["sec2", 1, "t2", null],
     ]);
     expect(rows.acbEvents[1]!.acbDeltaCad).toBe("128.000000");
+    // The audit trail keeps the rule and the exact rate used.
+    expect(rows.acbEvents.map((e) => [e.rule, e.fxRate])).toEqual([
+      ["opening_balance", null],
+      ["buy_cost_plus_commission", "1.4300000000"],
+      ["buy_cost_plus_commission", "1.0000000000"],
+    ]);
+  });
+
+  it("points corporate action events and merger cash gains at the corporate action, with no account", () => {
+    const rows = toDerivedRows(
+      "u1",
+      {
+        ...empty,
+        acbEvents: [
+          { entryId: "corporate:ca1", securityId: "sec2", date: "2025-03-01", kind: "merger", rule: "merger_rollover_in", fxRate: null, quantityDelta: new D(5), acbDeltaCad: new D(80), poolQuantityAfter: new D(5), poolAcbAfterCad: new D(80) },
+        ],
+        gains: [
+          { entryId: "corporate:ca1", kind: "merger_cash", securityId: "sec1", symbol: "OLD", accountId: "corporate", date: "2025-03-01", year: 2025, quantity: new D(10), proceedsCad: new D(30), acbCad: new D(20), feesCad: zero, gainCad: new D(10), deniedLossCad: zero, allowedGainCad: new D(10), incomplete: false },
+        ],
+      },
+      new Map(),
+      "2025-12-31",
+    );
+    expect(rows.acbEvents[0]).toMatchObject({ transactionId: null, manualAdjustmentId: null, corporateActionId: "ca1" });
+    expect(rows.realizedGains[0]).toMatchObject({ transactionId: null, corporateActionId: "ca1", accountId: null, kind: "merger_cash" });
+  });
+
+  it("writes reconciliation rows, with a null account for the pooled position", () => {
+    const rows = toDerivedRows(
+      "u1",
+      {
+        ...empty,
+        reconciliation: {
+          rows: [
+            { securityId: "sec1", symbol: "XYZ", accountId: null, ledgerQuantity: new D(10), brokerQuantity: new D(15), status: "broker_has_more" },
+            { securityId: "sec1", symbol: "XYZ", accountId: "tfsa1", ledgerQuantity: new D(3), brokerQuantity: new D(3), status: "match" },
+          ],
+          matched: 1,
+          total: 2,
+        },
+      },
+      new Map(),
+      "2025-12-31",
+    );
+    expect(rows.positionReconciliations.map((r) => [r.accountId, r.ledgerQuantity, r.brokerQuantity, r.status])).toEqual([
+      [null, "10.0000000000", "15.0000000000", "broker_has_more"],
+      ["tfsa1", "3.0000000000", "3.0000000000", "match"],
+    ]);
+  });
+});
+
+describe("toCorporateActions", () => {
+  it("maps a merger to one security-wide entry with its target, ratio, cash, and fair market value", () => {
+    const [e] = toCorporateActions(
+      [
+        {
+          id: "ca1",
+          userId: "u1",
+          kind: "merger",
+          securityId: "old",
+          targetSecurityId: "new",
+          effectiveDate: "2025-03-01",
+          currency: "USD",
+          ratio: "0.5000000000",
+          oldFmv: null,
+          newFmv: "40.000000",
+          cashPerShare: "3.000000",
+          note: null,
+          createdAt: new Date(0),
+          updatedAt: new Date(0),
+        },
+      ],
+      [
+        { id: "old", symbol: "OLD", currency: "USD" },
+        { id: "new", symbol: "NEW", currency: "USD" },
+      ],
+    );
+    expect(e).toMatchObject({ id: "corporate:ca1", kind: "merger", securityId: "old", accountType: "non_registered", tradeDate: "2025-03-01" });
+    expect(e!.target).toEqual({ securityId: "new", symbol: "NEW", currency: "USD" });
+    expect([e!.splitRatio!.toString(), e!.amount.toString(), e!.targetPrice!.toString(), e!.price.toString()]).toEqual(["0.5", "3", "40", "0"]);
   });
 });

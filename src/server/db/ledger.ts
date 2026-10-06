@@ -3,16 +3,20 @@ import type * as s from "./schema";
 
 /*
  * Pure mapping between database rows and the tax engine. No I/O here, so it is unit tested directly.
- * Engine entry ids are transaction ids; opening entries use the engine's `opening:<securityId>` form.
+ * Engine entry ids are transaction ids; opening entries use the engine's `opening:<securityId>` form,
+ * and corporate actions `corporate:<corporate action id>`.
  */
 
 type TransactionRow = typeof s.transactions.$inferSelect;
 type AccountRow = Pick<typeof s.brokerageAccounts.$inferSelect, "id" | "accountType">;
 type SecurityRow = Pick<typeof s.securities.$inferSelect, "id" | "symbol">;
 type ManualAdjustmentRow = typeof s.manualAdjustments.$inferSelect;
+type CorporateActionRow = typeof s.corporateActions.$inferSelect;
+type SecurityWithCurrency = SecurityRow & { currency: string };
 type FxRow = Pick<typeof s.fxRates.$inferSelect, "currency" | "rateDate" | "cadPerUnit">;
 
 const OPENING_PREFIX = "opening:";
+const CORPORATE_PREFIX = "corporate:";
 
 const dec = (value: string | null | undefined): Dec | undefined =>
   value === null || value === undefined ? undefined : new D(value);
@@ -76,6 +80,39 @@ export function toOpenings(
 }
 
 /**
+ * Spinoffs and mergers as security-wide engine entries. They carry no account: the engine applies
+ * them to the pool and to every registered account holding the security.
+ */
+export function toCorporateActions(
+  rows: readonly CorporateActionRow[],
+  securities: readonly SecurityWithCurrency[],
+): LedgerEntry[] {
+  const byId = new Map(securities.map((x) => [x.id, x]));
+  return rows.map((r) => {
+    const source = lookup(byId, r.securityId, "security");
+    const target = lookup(byId, r.targetSecurityId, "security");
+    return {
+      id: `${CORPORATE_PREFIX}${r.id}`,
+      accountId: "corporate",
+      accountType: "non_registered" as const,
+      securityId: r.securityId,
+      symbol: source.symbol,
+      currency: r.currency,
+      kind: r.kind,
+      tradeDate: r.effectiveDate,
+      settlementDate: r.effectiveDate,
+      quantity: new D(0),
+      price: new D(r.oldFmv ?? 0),
+      fees: new D(0),
+      amount: new D(r.cashPerShare),
+      splitRatio: new D(r.ratio),
+      target: { securityId: target.id, symbol: target.symbol, currency: target.currency },
+      targetPrice: dec(r.newFmv),
+    };
+  });
+}
+
+/**
  * Bank of Canada rate for the date, or the latest earlier one (weekends and holidays have none).
  * A date before every stored rate throws: a guessed rate would produce wrong tax numbers.
  */
@@ -122,6 +159,7 @@ export interface DerivedRows {
   harvestOpportunities: (typeof s.harvestOpportunities.$inferInsert)[];
   taxYearSummaries: (typeof s.taxYearSummaries.$inferInsert)[];
   taxWarnings: (typeof s.taxWarnings.$inferInsert)[];
+  positionReconciliations: (typeof s.positionReconciliations.$inferInsert)[];
 }
 
 /** Maps engine output to insert rows. `openingIds` maps securityId to the manual adjustment that produced its opening. */
@@ -132,10 +170,19 @@ export function toDerivedRows(
   asOfDate: string,
 ): DerivedRows {
   const seq = new Map<string, number>();
-  const source = (entryId: string, securityId: string) =>
-    entryId.startsWith(OPENING_PREFIX)
-      ? { transactionId: null, manualAdjustmentId: lookup(openingIds, securityId, "opening for security") }
-      : { transactionId: entryId, manualAdjustmentId: null };
+  const source = (entryId: string, securityId: string) => {
+    if (entryId.startsWith(OPENING_PREFIX)) {
+      return {
+        transactionId: null,
+        manualAdjustmentId: lookup(openingIds, securityId, "opening for security"),
+        corporateActionId: null,
+      };
+    }
+    if (entryId.startsWith(CORPORATE_PREFIX)) {
+      return { transactionId: null, manualAdjustmentId: null, corporateActionId: entryId.slice(CORPORATE_PREFIX.length) };
+    }
+    return { transactionId: entryId, manualAdjustmentId: null, corporateActionId: null };
+  };
 
   return {
     acbPositions: result.positions.map((p) => ({
@@ -155,29 +202,35 @@ export function toDerivedRows(
         ...source(e.entryId, e.securityId),
         eventDate: e.date,
         kind: e.kind,
+        rule: e.rule,
+        fxRate: e.fxRate ? e.fxRate.toFixed(10) : null,
         quantityDelta: quantityText(e.quantityDelta),
         acbDeltaCad: moneyText(e.acbDeltaCad),
         poolQuantityAfter: quantityText(e.poolQuantityAfter),
         poolAcbAfterCad: moneyText(e.poolAcbAfterCad),
       };
     }),
-    realizedGains: result.gains.map((g) => ({
-      userId,
-      transactionId: g.entryId,
-      securityId: g.securityId,
-      accountId: g.accountId,
-      kind: g.kind,
-      dispositionDate: g.date,
-      taxYear: g.year,
-      quantity: quantityText(g.quantity),
-      proceedsCad: moneyText(g.proceedsCad),
-      acbCad: moneyText(g.acbCad),
-      feesCad: moneyText(g.feesCad),
-      gainCad: moneyText(g.gainCad),
-      deniedLossCad: moneyText(g.deniedLossCad),
-      allowedGainCad: moneyText(g.allowedGainCad),
-      incomplete: g.incomplete,
-    })),
+    realizedGains: result.gains.map((g) => {
+      const corporate = g.entryId.startsWith(CORPORATE_PREFIX);
+      return {
+        userId,
+        transactionId: corporate ? null : g.entryId,
+        corporateActionId: corporate ? g.entryId.slice(CORPORATE_PREFIX.length) : null,
+        securityId: g.securityId,
+        accountId: corporate ? null : g.accountId,
+        kind: g.kind,
+        dispositionDate: g.date,
+        taxYear: g.year,
+        quantity: quantityText(g.quantity),
+        proceedsCad: moneyText(g.proceedsCad),
+        acbCad: moneyText(g.acbCad),
+        feesCad: moneyText(g.feesCad),
+        gainCad: moneyText(g.gainCad),
+        deniedLossCad: moneyText(g.deniedLossCad),
+        allowedGainCad: moneyText(g.allowedGainCad),
+        incomplete: g.incomplete,
+      };
+    }),
     superficialLosses: result.superficialLosses.map((l) => ({
       loss: {
         userId,
@@ -259,6 +312,7 @@ export function toDerivedRows(
         case "opening_balance_needed":
           return { ...base, shortfallQuantity: quantityText(w.shortfall) };
         case "superficial_loss_lost_forever":
+        case "registered_transfer_loss_denied":
           return { ...base, amountCad: moneyText(w.amountCad) };
         case "superficial_loss_pending":
           return { ...base, dueDate: w.windowEnd };
@@ -266,5 +320,13 @@ export function toDerivedRows(
           return base;
       }
     }),
+    positionReconciliations: result.reconciliation.rows.map((r) => ({
+      userId,
+      securityId: r.securityId,
+      accountId: r.accountId,
+      ledgerQuantity: quantityText(r.ledgerQuantity),
+      brokerQuantity: quantityText(r.brokerQuantity),
+      status: r.status,
+    })),
   };
 }

@@ -7,6 +7,9 @@ export interface WarningView {
     | "superficial_loss_lost_forever"
     | "superficial_loss_pending"
     | "unsupported_transfer"
+    | "transfer_unmatched"
+    | "transfer_value_missing"
+    | "registered_transfer_loss_denied"
     | "roc_without_position"
     | "split_reported_twice"
     | "assumed_year_config";
@@ -34,7 +37,15 @@ export function warningMessage(w: WarningView): string {
         w.dueDate ? ` on ${formatDate(w.dueDate)}` : ""
       }.`;
     case "unsupported_transfer":
-      return `${symbol}: a transfer between accounts was found. Transfers are not handled yet, so its ACB may be off.`;
+      return `${symbol}: a transfer between accounts was found. Refresh to apply the newer transfer rules.`;
+    case "transfer_unmatched":
+      return `${symbol}: shares moved to or from an account TaxBack cannot see. Check the position reconciliation and add an opening balance if needed.`;
+    case "transfer_value_missing":
+      return `${symbol}: shares crossed between a registered and a non-registered account, but the broker sent no market value, so the transfer was not applied.`;
+    case "registered_transfer_loss_denied":
+      return `${symbol}: shares moved into a registered account at a loss${
+        w.amountCad ? ` of ${formatMoney(w.amountCad)}` : ""
+      }. That loss is denied for good, unlike a superficial loss.`;
     case "roc_without_position":
       return `${symbol}: a return of capital arrived while no shares were held.`;
     case "split_reported_twice":

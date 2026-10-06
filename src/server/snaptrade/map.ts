@@ -59,6 +59,8 @@ export function accountKind(account: SnapTradeAccount): AccountKind {
 }
 
 const REGISTERED_PATTERNS: [RegExp, AccountType][] = [
+  // U.S. retirement accounts at U.S. brokers. Checked first, because "Roth IRA" must not read as anything else.
+  [/\b(roth\s+)?ira\b|\b401\s*\(?k\)?|\b403\s*\(?b\)?|\b457\s*\(?b\)?/i, "us_retirement"],
   [/\btfsa\b/i, "tfsa"],
   [/\bfhsa\b/i, "fhsa"],
   [/\bresp\b/i, "resp"],
@@ -167,6 +169,8 @@ export interface MappedSecurity {
   securityType: SecurityType;
   /** Issuer country from the listing; drives the default dividend class. */
   country: string | null;
+  /** Same for every listing of the same shares; null when SnapTrade has no FIGI for it. */
+  figiShareClass: string | null;
 }
 
 function countryOf(exchange: string | null | undefined): string | null {
@@ -216,6 +220,7 @@ export function securityFromSymbol(symbol: SnapTradeSymbol): MappedSecurity {
     currency: symbol.currency.code,
     securityType: securityTypeOf(symbol.type?.code),
     country: countryOf(exchange),
+    figiShareClass: symbol.figi_instrument?.figi_share_class || null,
   };
 }
 
@@ -265,6 +270,7 @@ export function mapPositions(positions: readonly SnapTradePosition[]): {
       currency,
       securityType: securityTypeOf(instrument.kind),
       country: countryOf(exchange),
+      figiShareClass: instrument.figi_instrument?.figi_share_class || null,
     });
 
     const quantity = dec(p.units);
@@ -336,6 +342,7 @@ const LEDGER_TYPES = new Set([
   "DIVIDEND",
   "SUBSTITUTE_DIVIDEND",
   "SPLIT",
+  "STOCK_DIVIDEND",
   "FEE",
   "TAX",
   "TRANSFER",
@@ -505,6 +512,23 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
         }
         transactions.push({ ...base(p, security), kind: "split", splitRatio: after.dividedBy(before) });
         held.set(security.snaptradeSymbolId, after);
+        break;
+      }
+      case "STOCK_DIVIDEND": {
+        // New shares instead of cash. The reported amount, when there is one, is the taxable dividend and
+        // becomes their cost; without it the engine treats them like a split (more shares, same ACB).
+        if (!security || units.isZero()) {
+          skip(a.type);
+          break;
+        }
+        transactions.push({
+          ...base(p, security),
+          kind: "stock_dividend",
+          quantity: units,
+          amount: dec(a.amount).abs(),
+          dividendClass: dividendClassFor(security),
+        });
+        hold(security.snaptradeSymbolId, units);
         break;
       }
       case "FEE": {

@@ -41,12 +41,15 @@ export function dedupeSplits(sorted: readonly LedgerEntry[]): SplitDedupe {
   return { duplicateIds, conflicts };
 }
 
-/** Same-day order: opening, splits, acquisitions, other income, then dispositions. */
+/** Same-day order: opening, splits and corporate actions, acquisitions, other income, then dispositions. */
 const KIND_ORDER: Record<EntryKind, number> = {
   opening: 0,
   split: 1,
+  spinoff: 1,
+  merger: 1,
   buy: 2,
   drip: 2,
+  stock_dividend: 2,
   transfer_in: 2,
   roc: 3,
   dividend: 3,
@@ -101,9 +104,61 @@ export function validateLedger(entries: readonly LedgerEntry[]): string[] {
       case "roc":
         if (e.amount.isNegative()) errors.push(`${at}: negative return of capital`);
         break;
+      case "stock_dividend":
+        if (!e.quantity.gt(0)) errors.push(`${at}: quantity must be positive`);
+        if (e.amount.isNegative()) errors.push(`${at}: negative stock dividend value`);
+        break;
+      case "transfer_in":
+      case "transfer_out":
+        if (!e.quantity.gt(0)) errors.push(`${at}: quantity must be positive`);
+        if (e.price.isNegative()) errors.push(`${at}: negative price`);
+        break;
+      case "spinoff":
+      case "merger":
+        if (!e.target || e.target.securityId === e.securityId) errors.push(`${at}: needs a different target security`);
+        if (!e.splitRatio || !e.splitRatio.gt(0)) errors.push(`${at}: needs a positive ratio`);
+        if (e.amount.isNegative()) errors.push(`${at}: negative cash per share`);
+        if (e.kind === "spinoff" && (!e.price.gt(0) || !e.targetPrice?.gt(0))) {
+          errors.push(`${at}: a spinoff needs both fair market values to split the ACB`);
+        }
+        if (e.kind === "merger" && e.amount.gt(0) && !e.targetPrice?.gt(0)) {
+          errors.push(`${at}: a merger with cash needs the new share's fair market value`);
+        }
+        break;
       default:
         break;
     }
   }
   return errors;
+}
+
+/** How far apart the two sides of one transfer may be reported. Brokers take a few days to move shares. */
+const TRANSFER_MATCH_DAYS = 10;
+
+/**
+ * Pairs each `transfer_out` with the `transfer_in` it became: same security and quantity, a different
+ * account, and dates within `TRANSFER_MATCH_DAYS`. Each side is used once, earliest match first.
+ * The returned map holds both directions (out -> in and in -> out). Expects a sorted ledger.
+ */
+export function pairTransfers(sorted: readonly LedgerEntry[]): ReadonlyMap<string, LedgerEntry> {
+  const pairs = new Map<string, LedgerEntry>();
+  const ins = sorted.filter((e) => e.kind === "transfer_in");
+  for (const out of sorted) {
+    if (out.kind !== "transfer_out") continue;
+    const from = addDays(out.settlementDate, -TRANSFER_MATCH_DAYS);
+    const to = addDays(out.settlementDate, TRANSFER_MATCH_DAYS);
+    const match = ins.find(
+      (i) =>
+        !pairs.has(i.id) &&
+        i.securityId === out.securityId &&
+        i.accountId !== out.accountId &&
+        i.quantity.eq(out.quantity) &&
+        i.settlementDate >= from &&
+        i.settlementDate <= to,
+    );
+    if (!match) continue;
+    pairs.set(out.id, match);
+    pairs.set(match.id, out);
+  }
+  return pairs;
 }

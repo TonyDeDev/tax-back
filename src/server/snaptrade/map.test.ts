@@ -103,6 +103,15 @@ describe("accounts", () => {
     );
   });
 
+  it("guesses U.S. retirement accounts at U.S. brokers", () => {
+    const guess = (raw_type: string, name: string | null = null) => guessAccountType(account({ raw_type, meta: null, name }));
+    expect([guess("IRA"), guess("ROTH_IRA"), guess("Rollover IRA"), guess("401K"), guess("401(k)"), guess("403b")]).toEqual(
+      Array(6).fill("us_retirement"),
+    );
+    // Words that merely contain the letters stay non-registered.
+    expect([guess("INDIVIDUAL"), guess("MARGIN", "Mirai growth"), guess("JOINT")]).toEqual(Array(3).fill("non_registered"));
+  });
+
   it("syncs investment and cash accounts, never credit cards", () => {
     expect(isSyncedAccount(account({}))).toBe(true);
     expect(isSyncedAccount(account({ account_category: null }))).toBe(true);
@@ -169,6 +178,7 @@ describe("mapActivities", () => {
         currency: "CAD",
         securityType: "etf",
         country: "CA",
+        figiShareClass: null,
       },
     ]);
   });
@@ -231,6 +241,18 @@ describe("mapActivities", () => {
     expect(skipped).toEqual({ SPLIT: 1 });
   });
 
+  it("maps stock dividends with their value, and counts their units for a later split", () => {
+    const { transactions } = mapActivities([
+      activity({ type: "BUY", units: 100, price: 10, settlement_date: "2026-01-05T15:00:00Z" }),
+      activity({ type: "STOCK_DIVIDEND", units: 5, amount: 52.5, settlement_date: "2026-03-05T15:00:00Z" }),
+      activity({ type: "SPLIT", units: 105, settlement_date: "2026-06-10T15:00:00Z" }),
+    ]);
+    const dividend = transactions.find((t) => t.kind === "stock_dividend")!;
+    expect([dividend.quantity.toString(), dividend.amount.toString(), dividend.dividendClass]).toEqual(["5", "52.5", "eligible"]);
+    // 105 held after the stock dividend, 105 added: a 2-for-1.
+    expect(transactions.find((t) => t.kind === "split")!.splitRatio!.toString()).toBe("2");
+  });
+
   it("maps fees and transfers", () => {
     const { transactions } = mapActivities([
       activity({ type: "FEE", symbol: null, amount: -9.99 }),
@@ -274,6 +296,25 @@ describe("mapActivities", () => {
     const [buy] = mapActivities([raw]).transactions;
     expect(buy!.raw).toBe(raw);
     expect(buy!.tradeDate).toBe("2026-03-02");
+  });
+});
+
+describe("share-class FIGI", () => {
+  it("is read from activity symbols and from positions, and is null when absent", () => {
+    const withFigi = { ...AAPL, figi_instrument: { figi_code: "BBG000B9XRY4", figi_share_class: "BBG001S5N8V8" } };
+    const { securities } = mapActivities([activity({ type: "BUY", symbol: withFigi, units: 1, price: 1 }), activity({ type: "BUY", units: 1, price: 1 })]);
+    expect(securities.map((x) => [x.symbol, x.figiShareClass])).toEqual([
+      ["AAPL", "BBG001S5N8V8"],
+      ["XEQT", null],
+    ]);
+    const positions = mapPositions([
+      {
+        instrument: { kind: "stock", id: "sym-ry", symbol: "RY", currency: "USD", exchange: "XNYS", figi_instrument: { figi_share_class: "BBG001S5S1X6" } },
+        units: "10",
+        currency: "USD",
+      },
+    ]);
+    expect(positions.securities[0]!.figiShareClass).toBe("BBG001S5S1X6");
   });
 });
 

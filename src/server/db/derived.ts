@@ -27,6 +27,7 @@ export async function replaceDerived(db: AnyDb, userId: string, rows: DerivedRow
       s.harvestOpportunities,
       s.taxYearSummaries,
       s.taxWarnings,
+      s.positionReconciliations,
     ]) {
       await tx.delete(table).where(eq(table.userId, userId));
     }
@@ -38,6 +39,7 @@ export async function replaceDerived(db: AnyDb, userId: string, rows: DerivedRow
     for (const part of chunks(rows.harvestOpportunities)) await tx.insert(s.harvestOpportunities).values(part);
     for (const part of chunks(rows.taxYearSummaries)) await tx.insert(s.taxYearSummaries).values(part);
     for (const part of chunks(rows.taxWarnings)) await tx.insert(s.taxWarnings).values(part);
+    for (const part of chunks(rows.positionReconciliations)) await tx.insert(s.positionReconciliations).values(part);
 
     for (const part of chunks(rows.superficialLosses)) {
       const inserted = await tx

@@ -123,10 +123,17 @@ async function upsertSecurities(tx: AnyDb, list: readonly MappedSecurity[]): Pro
   if (unique.size === 0) return ids;
 
   const existing = await tx
-    .select({ id: s.securities.id, snaptradeSymbolId: s.securities.snaptradeSymbolId })
+    .select({ id: s.securities.id, snaptradeSymbolId: s.securities.snaptradeSymbolId, figiShareClass: s.securities.figiShareClass })
     .from(s.securities)
     .where(inArray(s.securities.snaptradeSymbolId, [...unique.keys()]));
   for (const row of existing) ids.set(row.snaptradeSymbolId!, row.id);
+  // Fill in a share-class FIGI SnapTrade has started sending for a security we already know; never erase one.
+  for (const row of existing) {
+    const figi = unique.get(row.snaptradeSymbolId!)?.figiShareClass;
+    if (figi && row.figiShareClass !== figi) {
+      await tx.update(s.securities).set({ figiShareClass: figi }).where(eq(s.securities.id, row.id));
+    }
+  }
 
   for (const sec of unique.values()) {
     if (ids.has(sec.snaptradeSymbolId)) continue;
@@ -135,7 +142,13 @@ async function upsertSecurities(tx: AnyDb, list: readonly MappedSecurity[]): Pro
       .values({ ...sec })
       .onConflictDoUpdate({
         target: [s.securities.symbol, s.securities.exchange, s.securities.currency],
-        set: { snaptradeSymbolId: sec.snaptradeSymbolId, name: sec.name, securityType: sec.securityType, country: sec.country },
+        set: {
+          snaptradeSymbolId: sec.snaptradeSymbolId,
+          name: sec.name,
+          securityType: sec.securityType,
+          country: sec.country,
+          figiShareClass: sec.figiShareClass,
+        },
         setWhere: sql`${s.securities.snaptradeSymbolId} IS NULL`,
       })
       .returning({ id: s.securities.id });

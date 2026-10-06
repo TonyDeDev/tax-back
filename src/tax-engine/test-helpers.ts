@@ -19,6 +19,9 @@ interface EntryInit {
   ratio?: number | string;
   cls?: DividendClass;
   withholding?: number | string;
+  /** Spinoff or merger: the security received (its id doubles as its symbol). */
+  target?: string;
+  targetPrice?: number | string;
 }
 
 export function entry(init: EntryInit): LedgerEntry {
@@ -41,6 +44,8 @@ export function entry(init: EntryInit): LedgerEntry {
     splitRatio: init.ratio === undefined ? undefined : new D(init.ratio),
     dividendClass: init.cls,
     withholdingTax: init.withholding === undefined ? undefined : new D(init.withholding),
+    target: init.target === undefined ? undefined : { securityId: init.target, symbol: init.target, currency: init.currency ?? "CAD" },
+    targetPrice: init.targetPrice === undefined ? undefined : new D(init.targetPrice),
   };
 }
 

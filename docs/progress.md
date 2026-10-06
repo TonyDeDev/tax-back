@@ -1,6 +1,6 @@
 # Progress
 
-Status as of 2026-10-05.
+Status as of 2026-10-06.
 The full plan is in the Claude plan file, and scope rules are in `CLAUDE.md`.
 
 ## Done
@@ -112,6 +112,54 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 - Accounts grouped by brokerage, with a type picker so the user confirms each account's type (which recomputes).
 - Banner for a failed sync, with "Connect with SnapTrade" when the grant expired.
 
+### Phase 2b - Complete event engine, audit trail, reconciliation, and sale preview (2026-10-06)
+
+- Engine (`src/tax-engine`): stock dividends; transfers in kind paired across accounts (no event between
+  non-registered accounts, deemed sale into a registered account with the loss denied for good,
+  acquisition at fair market value out of one); spinoffs (ACB split by fair market value) and mergers
+  (rollover, cash part is a disposition).
+- Every ACB event records the rule applied and the Bank of Canada rate used (`AcbEvent.rule`, `fxRate`).
+- `reconcile.ts`: the replayed ledger against broker positions, pooled non-registered per security and
+  each registered account on its own.
+- `preview.ts`: "what if I sell?" runs the engine with one hypothetical sale today, settling T+1.
+- Migration `0004_audit_reconcile_corporate`: `corporate_actions`, `position_reconciliations`, and the
+  audit columns on `acb_events`. It clears `acb_events` (a cache) so `rule` can be NOT NULL; the next
+  sync, Refresh, or daily cron refills it.
+- SnapTrade `STOCK_DIVIDEND` activities are now mapped instead of skipped.
+- Security page: position, the ACB audit trail with receipts per step, ledger vs broker, the sale
+  preview, opening balance, and corporate actions. Hub: investments table and "ledger matches broker
+  positions: N%".
+- Writes from the security page insert and recompute in one transaction, so a change the engine
+  cannot compute is rolled back rather than leaving the results stuck.
+- Tests: golden cases for every new event (`events.test.ts`), the sale preview (`preview.test.ts`),
+  500 seeded random ledgers checking that shares are conserved in every account, ACB steps chain,
+  corporate actions move ACB without creating any, and gains add up (`conservation.test.ts`), and a
+  PGlite recompute and read-query test (`src/server/recompute.test.ts`).
+
+### U.S. brokerages (2026-10-06)
+
+- Interlisted shares are pooled as identical property: listings with the same share-class FIGI from
+  SnapTrade, or linked by the user, map to one canonical security before the engine runs
+  (`src/server/db/pools.ts`). The security page redirects any listing to the pooled page and shows
+  its listings, with link and unlink.
+- New `us_retirement` account type (IRA, Roth IRA, 401(k), 403(b), 457(b)), guessed from the broker and
+  treated like a registered account.
+- Dividend class follows the issuer: a U.S. listing pooled with a Canadian one is eligible, and the user
+  can set the class per security.
+- Migration `0005_interlisted_us_retirement`: `securities.figi_share_class`, `security_preferences`, and
+  the new account type in the checks. Sync fills the FIGI on known securities.
+
+### Phase 5 - Demo seed (2026-10-06)
+
+- `src/server/demo/seed.ts`: three brokerages (Questrade, Wealthsimple, Charles Schwab), non-registered,
+  TFSA, RRSP, Roth IRA, and a cash account, in CAD and USD, across three tax years, with dates relative
+  to today. It exercises pooled ACB, DRIPs, return of capital, a TSX/NYSE interlisted pool, a pending
+  superficial loss from a TFSA rebuy, a deemed sale into the TFSA, U.S. withholding, a transfer in
+  closed by an opening balance, a harvesting suggestion, and one reconciliation gap (8 of 9 match).
+- Exchange rates are real Bank of Canada rates; the seed never writes invented rates to the shared table.
+- `pnpm db:seed` runs it; the daily cron resets it; the Hub seeds it on the first demo visit if neither has run.
+- The Hub shows the demo's data, read-only.
+
 ### Docs
 
 - `docs/dev.md`: developer quick start.
@@ -122,9 +170,8 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 ## Not started
 
 - Phase 1 remainder: data table, alert banner, and a styleguide route.
-- Phase 3 remainder: page read queries.
-- Phase 5: demo seed and its daily reset in the cron (the demo user exists with id `demo` but has no data yet; `recomputeUser` is ready for it).
-- Phase 6 remainder: investments table, allocation charts, account and security detail pages.
+- Phase 3 remainder: page read queries for the Tax Center.
+- Phase 6 remainder: allocation charts and the account detail page (the Hub does not link to it yet).
 - Phase 7: Tax Center, Settings (marginal rate, delete my data), landing page.
 - Phases 9 and 10: quality pass and deploy.
 
@@ -137,8 +184,7 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 - Raise engine coverage to 100%.
 - `package.json` pins `@types/node@^20` while vitest 5 wants `^22 || >=24`. pnpm tolerates the
   mismatch; npm refuses to resolve it without `--legacy-peer-deps`. Worth aligning.
-- Surface `superficial_loss_pending` in the Hub alerts so an open 30-day window is visible while the
-  user can still act on it.
 - Per-transaction overrides (dividend class, return of capital), since SnapTrade cannot tell them apart.
+- Check the security page and the Hub's new cards in a real browser. On 2026-10-06 the demo was checked over HTTP only: every page returns 200 and the Hub, alerts, investments, reconciliation, and MSFT security page render the seeded data.
 - Flag positions whose holdings exceed the known history even without a sale, and prompt for an opening balance.
 - Re-check the Hub at 390px width in a real phone-sized viewport (the automated browser could not narrow below desktop width).

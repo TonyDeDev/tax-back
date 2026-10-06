@@ -25,10 +25,10 @@ Migrations are generated into `drizzle/` with `pnpm db:generate` and applied wit
 | Auth (Better Auth) | `users`, `sessions`, `accounts` (Google and SnapTrade OAuth grants, tokens encrypted), `verifications`, `rate_limits` |
 | Profile | `user_profiles` (demo flag, marginal rate, last sync) |
 | Brokerage data | `connections`, `brokerage_accounts`, `securities` (global), `transactions`, `holdings`, `account_balances` |
-| User input | `manual_adjustments` (opening quantity and ACB) |
+| User input | `manual_adjustments` (opening quantity and ACB), `corporate_actions` (spinoffs and mergers), `security_preferences` (listing links and dividend class) |
 | Reference | `fx_rates` (Bank of Canada, global) |
 | Operational | `sync_runs` |
-| Derived | `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `superficial_loss_replacements`, `income_events`, `harvest_opportunities`, `tax_year_summaries`, `tax_warnings` |
+| Derived | `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `superficial_loss_replacements`, `income_events`, `harvest_opportunities`, `tax_year_summaries`, `tax_warnings`, `position_reconciliations` |
 
 ```mermaid
 erDiagram
@@ -64,7 +64,16 @@ erDiagram
 - `brokerage_accounts.account_type_confirmed_at` is null while the type is only SnapTrade's guess; the UI asks the user to confirm.
 - `brokerage_accounts.kind` is `investment` or `cash`; cash accounts count toward value only, and the UI never asks for their type.
 - `holdings.broker_book_value` is kept for comparison only and is never used for ACB.
-- `acb_events` points at either a transaction or the manual adjustment behind an opening balance, enforced by a check that exactly one is set.
+- `securities.figi_share_class` is shared by every listing of the same shares. Recompute maps listings
+  with the same value (or linked in `security_preferences`) to one canonical id before the engine runs,
+  so derived rows always use the canonical id (`src/server/db/pools.ts`).
+- `security_preferences` is per user, because a link or a dividend class choice must not change other
+  users' results. `pool_security_id` equal to `security_id` means "keep separate".
+- `acb_events` points at exactly one source: a transaction, the manual adjustment behind an opening balance, or a corporate action, enforced by a check.
+  Each event also stores the `rule` applied and the `fx_rate` used, which makes it the audit trail behind every ACB figure.
+- `realized_gains` points at a transaction or, for the cash part of a merger, a corporate action; a merger has no account, so `account_id` is null for it.
+- `corporate_actions` are user input applied to the whole security, so they carry no account. Their checks mirror the engine's validation (a spinoff needs both fair market values, a merger with cash needs the new share's).
+- `position_reconciliations` holds one row per security for the pooled non-registered position (`account_id` null, unique with `NULLS NOT DISTINCT`) and one per registered account.
 - A partial unique index allows one running sync per user, which blocks double clicks and cron overlapping a manual refresh.
 - A partial unique index allows only one demo user.
 - `users.email` must be lowercase, which makes its unique constraint case-insensitive.
@@ -103,6 +112,8 @@ These hold for code not yet written; each is a way the schema alone cannot stop 
 | Hub: alerts | `idx_tax_warnings_user`, `idx_superficial_losses_pending` |
 | Account detail: activity, newest first | `idx_transactions_account_date` |
 | Security detail: ACB breakdown in order | `acb_events_pkey` |
+| Security detail: corporate actions, either side | `idx_corporate_actions_security`, `idx_corporate_actions_target` |
+| Hub: ledger vs broker | `position_reconciliations_key` (leads with `user_id`) |
 | Security detail and recompute: ledger by user | `idx_transactions_user_security_date` |
 | Tax Center year | `idx_realized_gains_user_year`, `idx_income_events_user_year`, `idx_superficial_losses_user_year`, `tax_year_summaries_pkey` |
 | Harvesting suggestions | `harvest_opportunities_pkey` |
@@ -122,11 +133,11 @@ These hold for code not yet written; each is a way the schema alone cannot stop 
 5. Limit Refresh to once per 15 minutes, run the daily cron, and show the last sync and its errors.
 6. Confirm each account's type, which decides exclusion from gains and inclusion in superficial loss checks.
 7. Pool ACB across every non-registered account at every brokerage, with the broker's book value alongside for comparison.
-8. Show a step-by-step ACB breakdown per security, including superficial loss adjustments and opening balances.
+8. Show a step-by-step ACB audit trail per security, with the rule and exchange rate behind each step, including superficial loss adjustments, opening balances, transfers, and corporate actions.
 9. Show each account's activity and holdings.
 10. Show Hub totals (holdings plus cash in CAD), YTD gains, estimated tax, and allocation by account type, brokerage, currency, and security type.
 11. Alert on open superficial loss windows, losses lost forever in a registered account, positions needing an opening balance, and years with assumed rates.
-12. Record an opening quantity and ACB when history is incomplete.
+12. Record an opening quantity and ACB when history is incomplete, and spinoffs and mergers that brokers do not report; compare the replayed ledger with broker positions and show the share that match.
 13. Show the Tax Center per year: Schedule 3 gains, superficial losses with their replacements, and dividends by class with gross-up, credit, and withholding.
 14. Suggest tax-loss harvesting with safe-sale and no-rebuy dates, plus estimated savings when the user sets a marginal rate.
 15. Export any Tax Center table as CSV.

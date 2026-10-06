@@ -18,3 +18,16 @@ export function addDays(iso: string, days: number): string {
 export function yearOf(iso: string): number {
   return Number(iso.slice(0, 4));
 }
+
+/**
+ * The next weekday after `iso`: Canadian equities settle T+1. Holidays are not modelled, so a trade
+ * before a long weekend may settle a day earlier here than at the broker.
+ */
+export function nextBusinessDay(iso: string): string {
+  let next = addDays(iso, 1);
+  for (;;) {
+    const day = parseUtc(next).getUTCDay();
+    if (day !== 0 && day !== 6) return next;
+    next = addDays(next, 1);
+  }
+}
