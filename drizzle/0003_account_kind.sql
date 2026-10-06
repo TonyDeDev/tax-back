@@ -1,0 +1,2 @@
+ALTER TABLE "brokerage_accounts" ADD COLUMN "kind" text DEFAULT 'investment' NOT NULL;--> statement-breakpoint
+ALTER TABLE "brokerage_accounts" ADD CONSTRAINT "brokerage_accounts_kind_check" CHECK (kind IN ('investment', 'cash'));

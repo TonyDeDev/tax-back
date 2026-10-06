@@ -43,9 +43,19 @@ export function torontoDate(value: string): string {
 
 // ===== Accounts =====
 
-/** Credit cards (`LOC`) and cash accounts (`DEPOSIT`) hold no securities and carry no capital gains. */
-export function isInvestmentAccount(account: SnapTradeAccount): boolean {
-  return !account.account_category || account.account_category === "INVESTMENT";
+/**
+ * Credit cards (`LOC`) are debt, not holdings, so they are never synced. Everything else is: investment
+ * accounts, and cash accounts (`DEPOSIT`: chequing, Wealthsimple Cash) whose money counts toward value.
+ */
+export function isSyncedAccount(account: SnapTradeAccount): boolean {
+  return account.account_category !== "LOC";
+}
+
+export type AccountKind = "investment" | "cash";
+
+/** Cash accounts hold no securities, so they never produce capital gains and need no type confirmation. */
+export function accountKind(account: SnapTradeAccount): AccountKind {
+  return account.account_category === "DEPOSIT" ? "cash" : "investment";
 }
 
 const REGISTERED_PATTERNS: [RegExp, AccountType][] = [
@@ -76,25 +86,54 @@ export interface MappedAccount {
   numberMasked: string | null;
   baseCurrency: string;
   brokerRawType: string | null;
+  kind: AccountKind;
   accountTypeGuess: AccountType;
 }
 
 /** Acronyms that stay upper case in account names. */
 const ACRONYMS = new Set(["TFSA", "RRSP", "FHSA", "RESP", "RRIF", "LIRA", "LIF", "RDSP", "USD", "CAD", "HISA"]);
 
-/**
- * SnapTrade names accounts "<institution> <TYPE>", e.g. "Wealthsimple Trade PERSONAL". The Hub already
- * groups by brokerage, so the prefix is dropped and shouted words are cased: "Personal", "TFSA".
- */
-export function friendlyAccountName(name: string | null | undefined, institution: string, rawType?: string | null): string {
-  let text = (name ?? "").trim();
-  if (text.toLowerCase().startsWith(institution.toLowerCase())) text = text.slice(institution.length).trim();
-  if (!text) text = rawType?.trim() || "Account";
-  return text
+const casing = (text: string) =>
+  text
     .split(/(\s+|_)/)
     .map((word) => (word === "_" ? " " : /^[A-Z]{2,}$/.test(word) && !ACRONYMS.has(word) ? word[0] + word.slice(1).toLowerCase() : word))
     .join("")
-    .replace(/\s+/g, " ");
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * A clearer name from SnapTrade's detailed type when the broker's own name is only the generic type:
+ * Wealthsimple calls both a savings account and a self-directed account "PERSONAL".
+ */
+function nameFromUnifiedType(unified: string | null | undefined): string | null {
+  if (!unified) return null;
+  const variant = (prefix: string, base: string) => {
+    const rest = unified.slice(prefix.length);
+    return rest === "NON_REGISTERED" ? base : `${casing(rest)} ${base.toLowerCase()}`;
+  };
+  if (unified === "CASH") return "Cash";
+  if (unified === "BUSINESS_CHEQUING") return "Business chequing";
+  if (unified.startsWith("HISA_PORTFOLIO_")) return variant("HISA_PORTFOLIO_", "Savings");
+  if (unified.startsWith("MANAGED_PORTFOLIO_")) return variant("MANAGED_PORTFOLIO_", "Managed");
+  return null;
+}
+
+/**
+ * SnapTrade names accounts "<institution> <TYPE>", e.g. "Wealthsimple Trade PERSONAL". The Hub already
+ * groups by brokerage, so the prefix is dropped and shouted words are cased: "Personal", "TFSA".
+ * When that leaves only the generic type, SnapTrade's detailed type gives a better one: "Savings", "Cash".
+ */
+export function friendlyAccountName(
+  name: string | null | undefined,
+  institution: string,
+  rawType?: string | null,
+  unifiedType?: string | null,
+): string {
+  let text = (name ?? "").trim();
+  if (text.toLowerCase().startsWith(institution.toLowerCase())) text = text.slice(institution.length).trim();
+  const generic = !text || (rawType != null && text.toLowerCase() === rawType.trim().toLowerCase());
+  if (generic) text = nameFromUnifiedType(unifiedType) ?? (text || rawType?.trim() || "Account");
+  return casing(text);
 }
 
 export function mapAccount(account: SnapTradeAccount): MappedAccount {
@@ -103,11 +142,12 @@ export function mapAccount(account: SnapTradeAccount): MappedAccount {
   return {
     snaptradeAccountId: account.id,
     snaptradeAuthorizationId: account.brokerage_authorization,
-    name: friendlyAccountName(account.name, account.institution_name, account.raw_type),
+    name: friendlyAccountName(account.name, account.institution_name, account.raw_type, account.meta?.unifiedAccountType),
     // Last 4 only: the full number is never stored.
     numberMasked: digits.length > 0 ? digits.slice(-4) : null,
     baseCurrency: currency,
     brokerRawType: account.raw_type ?? account.meta?.type ?? null,
+    kind: accountKind(account),
     accountTypeGuess: guessAccountType(account),
   };
 }

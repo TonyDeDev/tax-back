@@ -62,6 +62,7 @@ erDiagram
 - `transactions.raw` keeps the original SnapTrade activity, so a mapping fix can be replayed without a re-sync.
   It is the only JSON column that holds data, and nothing queries into it.
 - `brokerage_accounts.account_type_confirmed_at` is null while the type is only SnapTrade's guess; the UI asks the user to confirm.
+- `brokerage_accounts.kind` is `investment` or `cash`; cash accounts count toward value only, and the UI never asks for their type.
 - `holdings.broker_book_value` is kept for comparison only and is never used for ACB.
 - `acb_events` points at either a transaction or the manual adjustment behind an opening balance, enforced by a check that exactly one is set.
 - A partial unique index allows one running sync per user, which blocks double clicks and cron overlapping a manual refresh.

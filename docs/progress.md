@@ -51,7 +51,7 @@ Four defects found by reading the engine, each reproduced as a failing test befo
 ### Phase 3 (partial) - Database schema
 
 - Drizzle schema in `src/server/db/schema.ts` and Better Auth tables in `src/server/db/auth-schema.ts`; design notes in `docs/schema.md`.
-- Migrations `0000_init`, `0001_auth_and_tenant_fks`, and `0002_snaptrade_oauth` applied to Neon.
+- Migrations `0000_init`, `0001_auth_and_tenant_fks`, `0002_snaptrade_oauth`, and `0003_account_kind` applied to Neon.
 - Row-to-engine mappers (`ledger.ts`) and a transactional derived-table writer (`derived.ts`).
 - PGlite tests apply the real migrations and cover constraints, a full ledger round trip through `computeTax`, index use, cross-tenant references, and delete-my-data cascades.
 
@@ -101,6 +101,8 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 - `src/server/fx/boc.ts`: Bank of Canada Valet rates, fetching only the missing range.
 - `src/server/recompute.ts`: ledger to `computeTax` to the derived tables, for one user.
 - `src/server/sync/sync.ts`: stale lock recovery, one running sync per user, the 15-minute Refresh cooldown, upserts on the per-user SnapTrade keys, adopting demo-only securities, and failures stored with a user-safe message.
+- Cash accounts (Wealthsimple Cash, chequing) are synced for their balance (`brokerage_accounts.kind`, migration `0003_account_kind`); only credit cards are skipped.
+  Generic broker names are replaced from SnapTrade's detailed type, so a Wealthsimple savings account shows as "Savings" rather than "Personal".
 - Triggers: first sync after the grant (Hub and Settings), the Refresh button, and the daily cron (`/api/cron/sync`, which also deletes expired sessions).
 - Tested on PGlite with SnapTrade and the Bank of Canada stubbed, and run once against a real Wealthsimple connection.
 

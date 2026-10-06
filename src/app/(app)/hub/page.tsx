@@ -120,7 +120,7 @@ function Accounts({ summary }: { summary: HubSummary }) {
               // Phones: name and value on one line, the type picker below. Wider: name | picker | value.
               <li
                 key={a.id}
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_auto_7rem]"
+                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_14rem_7rem]"
               >
                 <div className="flex min-w-0 flex-col">
                   <span className="truncate text-body-sm font-medium">{a.name}</span>
@@ -136,7 +136,13 @@ function Accounts({ summary }: { summary: HubSummary }) {
                   {a.valueCad === null ? <span className="text-muted-foreground">No CAD rate</span> : <Money value={a.valueCad} />}
                 </span>
                 <div className="col-span-2 sm:col-span-1">
-                  <AccountTypeSelect accountId={a.id} accountName={a.name} value={a.accountType} confirmed={a.confirmed} />
+                  {a.kind === "cash" ? (
+                    <Badge variant="outline" title="Holds cash only, so it never affects capital gains.">
+                      Cash account
+                    </Badge>
+                  ) : (
+                    <AccountTypeSelect accountId={a.id} accountName={a.name} value={a.accountType} confirmed={a.confirmed} />
+                  )}
                 </div>
               </li>
             ))}

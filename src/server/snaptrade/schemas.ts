@@ -19,9 +19,16 @@ export const accountSchema = z.object({
   institution_name: z.string(),
   raw_type: z.string().nullish(),
   status: z.string().nullish(),
-  /** `INVESTMENT`, `DEPOSIT` (cash), or `LOC` (credit cards); only investment accounts are synced. */
+  /** `INVESTMENT`, `DEPOSIT` (cash), or `LOC` (credit cards, never synced). */
   account_category: z.string().nullish(),
-  meta: z.object({ type: z.string().nullish(), currency: z.string().nullish() }).nullish(),
+  meta: z
+    .object({
+      type: z.string().nullish(),
+      currency: z.string().nullish(),
+      /** SnapTrade's detailed type, e.g. `HISA_PORTFOLIO_NON_REGISTERED` (savings) or `CASH`. */
+      unifiedAccountType: z.string().nullish(),
+    })
+    .nullish(),
   balance: z.object({ total: z.object({ currency: z.string().nullish() }).nullish() }).nullish(),
 });
 export type SnapTradeAccount = z.infer<typeof accountSchema>;

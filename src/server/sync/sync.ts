@@ -13,7 +13,7 @@ import {
   type MappedBalance,
   type MappedHolding,
   type MappedSecurity,
-  isInvestmentAccount,
+  isSyncedAccount,
   mapAccount,
   mapActivities,
   mapBalances,
@@ -87,7 +87,7 @@ async function fetchAll(db: AnyDb, auth: Auth, userId: string): Promise<Fetched>
     const institutions = new Map(rawAccounts.map((a) => [a.brokerage_authorization, a.institution_name]));
     const accounts: FetchedAccount[] = [];
     // One account at a time keeps well inside SnapTrade's rate limits; a user has a handful of accounts.
-    for (const raw of rawAccounts.filter(isInvestmentAccount)) {
+    for (const raw of rawAccounts.filter(isSyncedAccount)) {
       const [positions, balances, activities] = await Promise.all([
         client.listPositions(raw.id),
         client.listBalances(raw.id),
@@ -150,7 +150,7 @@ async function upsertSecurities(tx: AnyDb, list: readonly MappedSecurity[]): Pro
 }
 
 async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) {
-  // Connections: one per SnapTrade brokerage authorization behind an investment account.
+  // Connections: one per SnapTrade brokerage authorization behind a synced account.
   const authById = new Map(fetched.authorizations.map((a) => [a.id, a]));
   const authorizationIds = [...new Set(fetched.accounts.map((a) => a.account.snaptradeAuthorizationId))];
   const connectionIds = new Map<string, string>();
@@ -214,6 +214,7 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
         numberMasked: a.numberMasked,
         baseCurrency: a.baseCurrency,
         brokerRawType: a.brokerRawType,
+        kind: a.kind,
         accountType: a.accountTypeGuess,
         historyCompleteFrom: f.activities.earliestDate,
       })
@@ -225,6 +226,7 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
           numberMasked: excluded("number_masked"),
           baseCurrency: excluded("base_currency"),
           brokerRawType: excluded("broker_raw_type"),
+          kind: excluded("kind"),
           // The user's confirmed type always wins over the broker's guess.
           accountType: sql`CASE WHEN ${s.brokerageAccounts.accountTypeConfirmedAt} IS NULL THEN excluded.account_type ELSE ${s.brokerageAccounts.accountType} END`,
           historyCompleteFrom: excluded("history_complete_from"),

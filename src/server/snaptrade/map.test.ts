@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   friendlyAccountName,
   guessAccountType,
-  isInvestmentAccount,
+  accountKind,
+  isSyncedAccount,
   mapAccount,
   mapActivities,
   mapBalances,
@@ -102,11 +103,25 @@ describe("accounts", () => {
     );
   });
 
-  it("only syncs investment accounts", () => {
-    expect(isInvestmentAccount(account({}))).toBe(true);
-    expect(isInvestmentAccount(account({ account_category: null }))).toBe(true);
-    expect(isInvestmentAccount(account({ account_category: "LOC" }))).toBe(false);
-    expect(isInvestmentAccount(account({ account_category: "DEPOSIT" }))).toBe(false);
+  it("syncs investment and cash accounts, never credit cards", () => {
+    expect(isSyncedAccount(account({}))).toBe(true);
+    expect(isSyncedAccount(account({ account_category: null }))).toBe(true);
+    expect(isSyncedAccount(account({ account_category: "DEPOSIT" }))).toBe(true);
+    expect(isSyncedAccount(account({ account_category: "LOC" }))).toBe(false);
+    expect(accountKind(account({ account_category: "DEPOSIT" }))).toBe("cash");
+    expect(accountKind(account({ account_category: "INVESTMENT" }))).toBe("investment");
+    expect(accountKind(account({ account_category: null }))).toBe("investment");
+  });
+
+  it("names savings and cash accounts from SnapTrade's detailed type", () => {
+    const ws = "Wealthsimple Trade";
+    expect(friendlyAccountName(`${ws} PERSONAL`, ws, "PERSONAL", "HISA_PORTFOLIO_NON_REGISTERED")).toBe("Savings");
+    expect(friendlyAccountName(`${ws} PERSONAL`, ws, "PERSONAL", "MANAGED_PORTFOLIO_NON_REGISTERED")).toBe("Managed");
+    expect(friendlyAccountName(`${ws} TFSA`, ws, "TFSA", "MANAGED_PORTFOLIO_TFSA")).toBe("TFSA managed");
+    expect(friendlyAccountName(`${ws} MSB`, ws, "MSB", "CASH")).toBe("Cash");
+    expect(friendlyAccountName(`${ws} PERSONAL`, ws, "PERSONAL", "SELF_DIRECTED_NON_REGISTERED")).toBe("Personal");
+    // A name the user or broker chose is kept.
+    expect(friendlyAccountName("Rainy day fund", ws, "PERSONAL", "HISA_PORTFOLIO_NON_REGISTERED")).toBe("Rainy day fund");
   });
 
   it("keeps only the last 4 characters of the account number", () => {

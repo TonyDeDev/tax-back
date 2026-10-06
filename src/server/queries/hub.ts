@@ -18,6 +18,8 @@ export interface HubAccount {
   name: string;
   numberMasked: string | null;
   accountType: AccountType;
+  /** Cash accounts hold no securities, so their type does not matter and is never asked for. */
+  kind: "investment" | "cash";
   confirmed: boolean;
   /** Holdings plus cash in CAD, or null when an FX rate is missing for one of its currencies. */
   valueCad: string | null;
@@ -99,6 +101,7 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
         name: s.brokerageAccounts.name,
         numberMasked: s.brokerageAccounts.numberMasked,
         accountType: s.brokerageAccounts.accountType,
+        kind: s.brokerageAccounts.kind,
         confirmedAt: s.brokerageAccounts.accountTypeConfirmedAt,
       })
       .from(s.brokerageAccounts)
@@ -162,6 +165,7 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
       name: a.name,
       numberMasked: a.numberMasked,
       accountType: a.accountType,
+      kind: a.kind,
       confirmed: a.confirmedAt !== null,
       valueCad: v === null ? null : v.toFixed(2),
     });
@@ -177,6 +181,6 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
     ytdGainCad: year?.net ?? "0",
     estimatedTaxCad: year?.tax ?? null,
     warnings,
-    unconfirmedAccounts: accounts.filter((a) => a.confirmedAt === null).length,
+    unconfirmedAccounts: accounts.filter((a) => a.kind === "investment" && a.confirmedAt === null).length,
   };
 }

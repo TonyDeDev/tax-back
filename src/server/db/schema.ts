@@ -63,6 +63,8 @@ export const TRANSACTION_KINDS = [
   "transfer_out",
 ] as const;
 export const DIVIDEND_CLASSES = ["eligible", "non_eligible", "foreign"] as const;
+/** `cash` accounts (chequing, Wealthsimple Cash) hold only cash, so they count toward value but never toward gains. */
+export const ACCOUNT_KINDS = ["investment", "cash"] as const;
 export const SECURITY_TYPES = ["equity", "etf", "mutual_fund", "bond", "option", "crypto", "other"] as const;
 export const CONNECTION_STATUSES = ["active", "broken"] as const;
 export const SYNC_TRIGGERS = ["connect", "manual", "cron", "demo_reset"] as const;
@@ -141,6 +143,7 @@ export const brokerageAccounts = pgTable(
     baseCurrency: text("base_currency").notNull(),
     /** What SnapTrade reported, e.g. "TFSA" or "Margin". */
     brokerRawType: text("broker_raw_type"),
+    kind: text("kind", { enum: ACCOUNT_KINDS }).notNull().default("investment"),
     accountType: text("account_type", { enum: ACCOUNT_TYPES }).notNull().default("non_registered"),
     /** Null while `accountType` is only a guess; the UI asks the user to confirm. */
     accountTypeConfirmedAt: instant("account_type_confirmed_at"),
@@ -160,6 +163,7 @@ export const brokerageAccounts = pgTable(
     index("idx_brokerage_accounts_connection").on(t.connectionId, t.userId),
     currencyCheck("brokerage_accounts_base_currency_check", "base_currency"),
     check("brokerage_accounts_account_type_check", inList("account_type", ACCOUNT_TYPES)),
+    check("brokerage_accounts_kind_check", inList("kind", ACCOUNT_KINDS)),
   ],
 );
 

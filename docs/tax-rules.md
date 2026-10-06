@@ -57,7 +57,8 @@ This is a concept demo and not tax advice.
 
 - Dates are the Toronto calendar day of SnapTrade's UTC timestamp, so an evening trade on December 31 stays in that year.
 - A trade that settles in a different currency from the listing (a US stock bought with CAD) uses the cash actually paid or received, from the activity amount.
-- Only investment accounts are read; credit cards and cash accounts are skipped.
+- Investment and cash accounts are read; credit cards are skipped.
+  Cash accounts (chequing, Wealthsimple Cash) count toward total value but hold no securities, so they never affect gains and need no type confirmation.
 - Each account's type is guessed from the broker and stays unconfirmed until the user confirms it in the Hub.
   A confirmed type is never overwritten by a later sync.
 

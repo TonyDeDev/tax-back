@@ -93,6 +93,18 @@ const snaptrade = {
       meta: { type: "non_registered", currency: "CAD" },
     },
     {
+      // Wealthsimple Cash: a cash account, synced for its balance.
+      id: "acc-cash",
+      brokerage_authorization: "auth-ws",
+      name: "Wealthsimple Trade MSB",
+      number: "HQ0004CASH",
+      institution_name: "Wealthsimple Trade",
+      raw_type: "MSB",
+      status: "open",
+      account_category: "DEPOSIT",
+      meta: { type: "ca_cash_msb", currency: "CAD", unifiedAccountType: "CASH" },
+    },
+    {
       id: "acc-card",
       brokerage_authorization: "auth-ws",
       name: "Card",
@@ -124,7 +136,11 @@ const snaptrade = {
       { instrument: { kind: "etf", id: "sym-xeqt", symbol: "XEQT.TO", raw_symbol: "XEQT", currency: "CAD", exchange: "XTSE" }, units: "5", price: "46", cost_basis: "31", currency: "CAD" },
     ],
   } as Record<string, unknown[]>,
-  balances: { "acc-nr": [{ currency: { code: "CAD" }, cash: 100.5 }], "acc-tfsa": [] } as Record<string, unknown[]>,
+  balances: {
+    "acc-nr": [{ currency: { code: "CAD" }, cash: 100.5 }],
+    "acc-tfsa": [],
+    "acc-cash": [{ currency: { code: "CAD" }, cash: 3501.09 }],
+  } as Record<string, unknown[]>,
 };
 
 /** Weekday USD/CAD observations at 1.35 for any requested range. */
@@ -213,21 +229,23 @@ describe("syncUser", () => {
     expect(outcome.status).toBe("succeeded");
 
     const accounts = await db.select().from(s.brokerageAccounts).where(eq(s.brokerageAccounts.userId, A));
-    expect(accounts.map((a) => [a.snaptradeAccountId, a.name, a.accountType, a.numberMasked, a.accountTypeConfirmedAt])).toEqual(
+    expect(accounts.map((a) => [a.snaptradeAccountId, a.name, a.kind, a.accountType, a.numberMasked, a.accountTypeConfirmedAt])).toEqual(
       expect.arrayContaining([
-        ["acc-nr", "Personal", "non_registered", "NRAB", null],
-        ["acc-tfsa", "TFSA", "tfsa", "TFSA", null],
+        ["acc-nr", "Personal", "investment", "non_registered", "NRAB", null],
+        ["acc-tfsa", "TFSA", "investment", "tfsa", "TFSA", null],
+        ["acc-cash", "Cash", "cash", "non_registered", "CASH", null],
       ]),
     );
-    expect(accounts).toHaveLength(2);
+    // The credit card and the empty closed account are not stored.
+    expect(accounts).toHaveLength(3);
     expect(accounts.find((a) => a.snaptradeAccountId === "acc-nr")!.historyCompleteFrom).toBe("2026-01-05");
 
     expect(await rows(s.connections, A)).toBe(1);
     expect(await rows(s.transactions, A)).toBe(5);
     expect(await rows(s.holdings, A)).toBe(3);
 
-    const [cash] = await db.select().from(s.accountBalances).where(eq(s.accountBalances.userId, A));
-    expect(cash!.cash).toBe("100.500000");
+    const cash = await db.select().from(s.accountBalances).where(eq(s.accountBalances.userId, A));
+    expect(cash.map((c) => c.cash).sort()).toEqual(["100.500000", "3501.090000"]);
 
     // The non-registered sale at a loss, with the TFSA rebuy inside 30 days: denied and lost for good.
     const [gain] = await db.select().from(s.realizedGains).where(eq(s.realizedGains.userId, A));
@@ -248,7 +266,7 @@ describe("syncUser", () => {
 
     const [run] = await db.select().from(s.syncRuns).where(eq(s.syncRuns.userId, A));
     expect(run).toMatchObject({ status: "succeeded", trigger: "connect" });
-    expect(run!.stats).toMatchObject({ accounts: 2, transactions: 5, holdings: 3, skipped: { CONTRIBUTION: 1 } });
+    expect(run!.stats).toMatchObject({ accounts: 3, transactions: 5, holdings: 3, skipped: { CONTRIBUTION: 1 } });
     const [profile] = await db.select().from(s.userProfiles).where(eq(s.userProfiles.userId, A));
     expect(profile!.lastSyncedAt).not.toBeNull();
     expect(profile!.lastRecomputedAt).not.toBeNull();
@@ -269,7 +287,7 @@ describe("syncUser", () => {
     const after = await db.select({ id: s.transactions.id }).from(s.transactions).where(eq(s.transactions.userId, A));
     expect(after.map((r) => r.id).sort()).toEqual(before.map((r) => r.id).sort());
     expect(await rows(s.holdings, A)).toBe(3);
-    expect(await rows(s.brokerageAccounts, A)).toBe(2);
+    expect(await rows(s.brokerageAccounts, A)).toBe(3);
     expect(bocCalls).toBe(0);
   });
 
@@ -378,7 +396,7 @@ describe("syncUser", () => {
     });
     await syncUser(db, fakeAuth().auth, A, "cron", later(SYNC_COOLDOWN_MS * 12));
     const ids = (await db.select().from(s.brokerageAccounts).where(eq(s.brokerageAccounts.userId, A))).map((a) => a.snaptradeAccountId);
-    expect(ids.sort()).toEqual(["acc-nr", "acc-tfsa"]);
+    expect(ids.sort()).toEqual(["acc-cash", "acc-nr", "acc-tfsa"]);
   });
 
   it("flags a brokerage that is no longer shared, but keeps its history", async () => {
