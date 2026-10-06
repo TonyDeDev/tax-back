@@ -48,15 +48,23 @@ Four defects found by reading the engine, each reproduced as a failing test befo
 - Placeholder pages for landing, sign-in, Hub, account detail, security detail, Tax Center, and Settings.
 - Checked in dark and light at desktop and 390px width with no horizontal scroll.
 
+### Phase 3 (partial) - Database schema
+
+- Drizzle schema in `src/server/db/schema.ts` and Better Auth tables in `src/server/db/auth-schema.ts`; design notes in `docs/schema.md`.
+- First migration generated in `drizzle/0000_init.sql`; not yet applied to Neon.
+- Row-to-engine mappers (`ledger.ts`) and a transactional derived-table writer (`derived.ts`).
+- PGlite tests apply the real migration and cover constraints, a full ledger round trip through `computeTax`, index use, and delete-my-data cascades.
+
 ### Docs
 
 - `docs/dev.md`: developer quick start.
 - `docs/tax-rules.md`: rules implemented and known limits.
+- `docs/schema.md`: tables, design decisions, query-to-index map, and what the schema supports.
 
 ## Not started
 
 - Phase 1 remainder: data table, alert banner, and a styleguide route.
-- Phase 3: database schema and queries.
+- Phase 3 remainder: page read queries, and applying the migration to a Neon project.
 - Phase 4: auth.
 - Phase 5: demo seed and recompute pipeline.
 - Phases 6 and 7: Hub, Tax Center, Settings, landing page.
