@@ -11,7 +11,7 @@ import { NAV_ITEMS, isActive } from "./nav-items";
 export function Sidebar({ user }: { user: ShellUser }) {
   const pathname = usePathname();
   return (
-    <aside className="sticky top-8 hidden h-[calc(100dvh-2rem)] w-60 shrink-0 flex-col justify-between border-r bg-card p-4 md:flex">
+    <aside className="sticky top-8 hidden h-[calc(100dvh-2rem)] w-60 shrink-0 flex-col justify-between border-r bg-card p-4 lg:flex">
       <div className="flex flex-col gap-6">
         <Brand className="px-2 pt-2" />
         <nav aria-label="Main" className="flex flex-col gap-1">

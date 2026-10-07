@@ -8,7 +8,7 @@ import { NAV_ITEMS, isActive } from "./nav-items";
 export function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-10 border-t bg-card md:hidden">
+    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-10 border-t bg-card lg:hidden">
       <ul className="grid grid-cols-3">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item);

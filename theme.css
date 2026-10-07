@@ -84,7 +84,8 @@
   --popover: #f6f8fa;
   --popover-foreground: #0f172a;
   --muted: #eef1f4;
-  --muted-foreground: #5b6573;
+  /* Steel: a palette neutral at 8.6:1 on cards (the old blue-gray was 5.5:1 and off-palette). */
+  --muted-foreground: #49474e;
   --secondary: #eef1f4;
   --secondary-foreground: #0f172a;
   --accent: #eef1f4;
@@ -93,11 +94,21 @@
   --primary-foreground: #ffffff;
   --border: #e3e7eb;
   --input: #e3e7eb;
-  --ring: #93b4f5;
+  --ring: #2563eb;
   --link: #2563eb;
   --positive: #15803d;
   --negative: #c2410c;
   --destructive: #c2410c;
+  /* Featured surfaces and tags: a faint tint of the primary, derived rather than a new color. */
+  --highlight: color-mix(in srgb, #2563eb 6%, #ffffff);
+  --highlight-border: color-mix(in srgb, #2563eb 35%, #e3e7eb);
+  --highlight-foreground: #2563eb;
+  /* Charts: categorical slots in fixed order, then the hatch used for cash. */
+  --chart-1: #2563eb;
+  --chart-2: #93b4f5;
+  --chart-3: #7c7a85;
+  --chart-4: #b5b2bc;
+  --chart-hatch: #7c7a85;
 }
 
 .dark {
@@ -108,7 +119,8 @@
   --popover: #121113;
   --popover-foreground: #eeeef0;
   --muted: #1a191b;
-  --muted-foreground: #7c7a85;
+  /* Silver: Fog (#7c7a85) is only 4.46:1 on Graphite and 4.15:1 on Obsidian, under WCAG AA. */
+  --muted-foreground: #b5b2bc;
   --secondary: #1a191b;
   --secondary-foreground: #eeeef0;
   --accent: #232225;
@@ -117,11 +129,20 @@
   --primary-foreground: #04040b;
   --border: #2b292d;
   --input: #232225;
-  --ring: #2d5736;
+  --ring: #71d083;
   --link: #70b8ff;
   --positive: #71d083;
   --negative: #e5675c;
   --destructive: #e5675c;
+  --highlight: #1b2a1e;
+  --highlight-border: #2d5736;
+  --highlight-foreground: #71d083;
+  /* Signal Green, LED Green, Fog, Steel; Steel and LED Green sit under 3:1, so every chart also labels values. */
+  --chart-1: #71d083;
+  --chart-2: #366740;
+  --chart-3: #7c7a85;
+  --chart-4: #49474e;
+  --chart-hatch: #7c7a85;
 }
 
 @theme inline {
@@ -146,4 +167,12 @@
   --color-positive: var(--positive);
   --color-negative: var(--negative);
   --color-destructive: var(--destructive);
+  --color-highlight: var(--highlight);
+  --color-highlight-border: var(--highlight-border);
+  --color-highlight-foreground: var(--highlight-foreground);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-hatch: var(--chart-hatch);
 }

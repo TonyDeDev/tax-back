@@ -7,7 +7,15 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DEMO_USER_ID } from "@/server/auth/demo-plugin";
 import * as s from "@/server/db/schema";
 import type { AnyDb } from "@/server/db/types";
-import { getInvestments, getReconciliation } from "@/server/queries/hub";
+import {
+  allocationByType,
+  getHoldingsByAccount,
+  getHubSummary,
+  getInvestments,
+  getReconciliation,
+  getValueHistory,
+  latestChange,
+} from "@/server/queries/hub";
 import { addDays } from "@/tax-engine/dates";
 import { ensureDemoSeeded, seedDemo } from "./seed";
 
@@ -107,10 +115,62 @@ describe("demo seed", () => {
     expect(rows.map((r) => r.symbol).sort()).toEqual(["AAPL", "BCE", "MSFT", "RY", "SHOP", "VFV", "XEQT"]);
   });
 
+  it("has a value history that ends exactly on today's Hub total, overall and per brokerage", async () => {
+    const summary = await getHubSummary(db, DEMO_USER_ID, TODAY);
+    const history = await getValueHistory(db, DEMO_USER_ID);
+    expect(history.length).toBeGreaterThan(400);
+    expect(history.at(-1)).toEqual({ day: TODAY, valueCad: summary.totalValueCad });
+    expect(history[0]!.day < addDays(TODAY, -900)).toBe(true);
+    expect(latestChange(history)).toMatchObject({ sinceDay: addDays(TODAY, -1) });
+
+    for (const brokerage of summary.brokerages) {
+      const own = await getValueHistory(db, DEMO_USER_ID, brokerage.accounts.map((a) => a.id));
+      expect(own.at(-1)!.valueCad).toBe(brokerage.totalCad);
+    }
+  });
+
+  it("splits the total by account type, with cash accounts on their own", async () => {
+    const summary = await getHubSummary(db, DEMO_USER_ID, TODAY);
+    const slices = allocationByType(summary.brokerages);
+    expect(slices.map((x) => x.key)).toEqual(["non_registered", "tfsa", "rrsp", "other_registered", "cash"]);
+    const sum = slices.reduce((acc, x) => acc + Number(x.valueCad), 0);
+    expect(sum).toBeCloseTo(Number(summary.totalValueCad), 2);
+    expect(slices.find((x) => x.key === "cash")!.valueCad).toBe("3500.00");
+  });
+
+  it("narrows investments to one brokerage, keeps ACB pooled, and has price trends", async () => {
+    const summary = await getHubSummary(db, DEMO_USER_ID, TODAY);
+    const ws = summary.brokerages.find((b) => b.name === "Wealthsimple")!;
+    const ids = ws.accounts.map((a) => a.id);
+    const all = await getInvestments(db, DEMO_USER_ID, TODAY);
+    const rows = await getInvestments(db, DEMO_USER_ID, TODAY, ids);
+    expect(rows.map((r) => r.symbol).sort()).toEqual(["VFV", "XEQT"]);
+    const xeqt = rows.find((r) => r.symbol === "XEQT")!;
+    // XEQT units at Wealthsimple only, but its ACB is the pool across Questrade too.
+    expect(Number(xeqt.brokerQuantity)).toBeLessThan(Number(all.find((r) => r.symbol === "XEQT")!.brokerQuantity));
+    expect(xeqt.totalAcbCad).toBe(all.find((r) => r.symbol === "XEQT")!.totalAcbCad);
+    expect(xeqt.trend.length).toBeGreaterThan(60);
+    expect(Number(xeqt.trend.at(-1))).toBeCloseTo(33.1, 6);
+
+    const perAccount = await getHoldingsByAccount(db, DEMO_USER_ID, TODAY);
+    const [held] = await db.select({ n: count() }).from(s.holdings).where(eq(s.holdings.userId, DEMO_USER_ID));
+    expect(perAccount).toHaveLength(held!.n);
+    // Both RY listings link to the one pooled security page.
+    expect(new Set(perAccount.filter((r) => r.symbol === "RY").map((r) => r.securityId)).size).toBe(1);
+  });
+
   it("resets to the same state when run again, and ensureDemoSeeded leaves it alone", async () => {
     const totals = async () =>
       Promise.all(
-        [s.transactions, s.holdings, s.acbEvents, s.realizedGains, s.positionReconciliations].map(async (table) => {
+        [
+          s.transactions,
+          s.holdings,
+          s.acbEvents,
+          s.realizedGains,
+          s.positionReconciliations,
+          s.accountValueSnapshots,
+          s.securityPriceSnapshots,
+        ].map(async (table) => {
           const [row] = await db.select({ n: count() }).from(table).where(eq(table.userId, DEMO_USER_ID));
           return row!.n;
         }),

@@ -43,7 +43,7 @@ export function AccountTypeSelect({ accountId, accountName, value, confirmed, re
             setCurrent(event.target.value);
             change(event.target.value);
           }}
-          className="h-8 rounded-md border border-border bg-background px-2 text-body-sm text-foreground disabled:opacity-50"
+          className="h-8 min-w-0 flex-1 rounded-md border border-border bg-accent px-2 text-body-sm text-foreground disabled:opacity-50"
         >
           {ACCOUNT_TYPE_OPTIONS.map(([type, label]) => (
             <option key={type} value={type}>

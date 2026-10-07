@@ -1,5 +1,5 @@
 import "server-only";
-import { count, eq, inArray } from "drizzle-orm";
+import { asc, count, eq, inArray } from "drizzle-orm";
 import { DEMO_USER_ID, ensureDemoUser } from "@/server/auth/demo-plugin";
 import * as s from "@/server/db/schema";
 import type { AnyDb } from "@/server/db/types";
@@ -139,12 +139,65 @@ const VFV_UNTRACKED = "10";
 const CASH: Partial<Record<AccountKey, string>> = {
   qtMargin: "1240.55",
   qtTfsa: "85.10",
-  wsPersonal: "410.00",
+  // Includes the SHOP sale's proceeds, waiting out the 30-day superficial loss window.
+  wsPersonal: "4810.00",
   wsRrsp: "22.70",
   wsCash: "3500.00",
   swIndividual: "512.33",
   swRoth: "41.00",
 };
+
+/** Days of value history: every day for the last 400, then weekly back to the first trade. */
+const DAILY_HISTORY_DAYS = 400;
+
+/**
+ * An illustrative price path for one security: straight lines between the prices it traded at, with a
+ * deterministic wobble that is zero at every trade, so each ledger price and today's price are exact.
+ */
+function pricePath(key: SecurityKey): (daysAgo: number) => Dec {
+  const knots = [
+    ...LEDGER.filter((e) => e.security === key && e.price !== undefined).map((e) => ({ daysAgo: e.daysAgo, price: new D(e.price!) })),
+    { daysAgo: 0, price: new D(SECURITIES[key].price) },
+  ].sort((a, b) => b.daysAgo - a.daysAgo);
+  const phase = [...key].reduce((sum, c) => sum + c.charCodeAt(0), 0) / 7;
+  return (daysAgo) => {
+    const first = knots[0]!;
+    if (daysAgo >= first.daysAgo) return first.price;
+    const right = knots.findIndex((k) => k.daysAgo <= daysAgo);
+    const a = knots[right - 1]!;
+    const b = knots[right]!;
+    const t = a.daysAgo === b.daysAgo ? 1 : (a.daysAgo - daysAgo) / (a.daysAgo - b.daysAgo);
+    const wobble = 0.6 * Math.sin(daysAgo * 0.21 + phase) + 0.4 * Math.sin(daysAgo * 0.057 + 2 * phase);
+    const linear = a.price.plus(b.price.minus(a.price).times(t));
+    return linear.times(new D(1).plus(new D(0.035 * wobble * 4 * t * (1 - t)).toDecimalPlaces(6)));
+  };
+}
+
+/** What an entry did to its account's cash, in the account's currency. DRIPs and transfers move no cash. */
+function cashFlow(e: SeedEntry): Dec {
+  const gross = new D(e.qty ?? 0).times(e.price ?? 0);
+  switch (e.kind) {
+    case "buy":
+      return gross.plus(e.fees ?? 0).negated();
+    case "sell":
+      return gross.minus(e.fees ?? 0);
+    case "dividend":
+    case "roc":
+      return new D(e.amount ?? 0).minus(e.withholding ?? 0);
+    default:
+      return new D(0);
+  }
+}
+
+/** CAD per unit on `date` from rows sorted by date: the latest rate on or before it, as the Hub uses. */
+function rateOn(rows: { date: string; rate: Dec }[], date: string): Dec {
+  let found: Dec | null = null;
+  for (const r of rows) {
+    if (r.date > date) break;
+    found = r.rate;
+  }
+  return found ?? rows[0]?.rate ?? new D(1);
+}
 
 /** A weekday `daysAgo` days before `today`; weekends move back to Friday. */
 function tradeDay(today: string, daysAgo: number): string {
@@ -206,6 +259,7 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
     await tx.delete(s.corporateActions).where(eq(s.corporateActions.userId, DEMO_USER_ID));
     await tx.delete(s.securityPreferences).where(eq(s.securityPreferences.userId, DEMO_USER_ID));
     await tx.delete(s.syncRuns).where(eq(s.syncRuns.userId, DEMO_USER_ID));
+    await tx.delete(s.securityPriceSnapshots).where(eq(s.securityPriceSnapshots.userId, DEMO_USER_ID));
 
     const connections = await tx
       .insert(s.connections)
@@ -317,6 +371,53 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
     });
     // The two RY listings are linked as the same shares. A real sync would usually match them by FIGI.
     await tx.insert(s.securityPreferences).values({ userId: DEMO_USER_ID, securityId: securityId("RY_US"), poolSecurityId: securityId("RY") });
+    // Value history for the Hub chart, replayed from the ledger above at illustrative prices and real
+    // Bank of Canada rates. Cash is today's balance less the trades and income since, floored at zero
+    // (a deposit funded it). Day 0 is exactly today's holdings and cash.
+    const usd = (
+      await tx
+        .select({ date: s.fxRates.rateDate, rate: s.fxRates.cadPerUnit })
+        .from(s.fxRates)
+        .where(eq(s.fxRates.currency, "USD"))
+        .orderBy(asc(s.fxRates.rateDate))
+    ).map((r) => ({ date: r.date, rate: new D(r.rate) }));
+    const fxOn = (currency: string, date: string) => (currency === "CAD" ? new D(1) : rateOn(usd, date));
+    const paths = new Map((Object.keys(SECURITIES) as SecurityKey[]).map((key) => [key, pricePath(key)]));
+    const oldest = Math.max(...LEDGER.map((e) => e.daysAgo));
+    const valueRows: (typeof s.accountValueSnapshots.$inferInsert)[] = [];
+    const priceRows: (typeof s.securityPriceSnapshots.$inferInsert)[] = [];
+    for (let daysAgo = oldest; daysAgo >= 0; daysAgo--) {
+      if (daysAgo > DAILY_HISTORY_DAYS && daysAgo % 7 !== 0) continue;
+      const date = addDays(today, -daysAgo);
+      const quantities = new Map<string, Dec>();
+      for (const e of LEDGER) {
+        if (e.daysAgo < daysAgo) continue;
+        const sign = ["buy", "drip", "transfer_in"].includes(e.kind) ? 1 : ["sell", "transfer_out"].includes(e.kind) ? -1 : 0;
+        if (sign === 0) continue;
+        const key = `${e.account}|${e.security}`;
+        quantities.set(key, (quantities.get(key) ?? new D(0)).plus(new D(e.qty ?? 0).times(sign)));
+      }
+      quantities.set("wsRrsp|VFV", (quantities.get("wsRrsp|VFV") ?? new D(0)).plus(VFV_UNTRACKED));
+      const priceCad = (key: SecurityKey) => paths.get(key)!(daysAgo).times(fxOn(SECURITIES[key].currency, date));
+      const heldSecurities = new Set<SecurityKey>();
+      for (const [key, account] of Object.entries(ACCOUNTS) as [AccountKey, (typeof ACCOUNTS)[AccountKey]][]) {
+        const later = LEDGER.filter((e) => e.account === key && e.daysAgo < daysAgo).reduce((sum, e) => sum.plus(cashFlow(e)), new D(0));
+        let value = D.max(new D(CASH[key] ?? 0).minus(later), 0).times(fxOn(account.currency, date));
+        for (const [pair, quantity] of quantities) {
+          const [accountKey, securityKey] = pair.split("|") as [AccountKey, SecurityKey];
+          if (accountKey !== key || quantity.lte(0)) continue;
+          heldSecurities.add(securityKey);
+          value = value.plus(quantity.times(paths.get(securityKey)!(daysAgo)).times(fxOn(SECURITIES[securityKey].currency, date)));
+        }
+        valueRows.push({ accountId: accountId(key), userId: DEMO_USER_ID, day: date, valueCad: value.toFixed(6) });
+      }
+      for (const key of heldSecurities) {
+        priceRows.push({ userId: DEMO_USER_ID, securityId: securityId(key), day: date, priceCad: priceCad(key).toFixed(6) });
+      }
+    }
+    for (let i = 0; i < valueRows.length; i += 1000) await tx.insert(s.accountValueSnapshots).values(valueRows.slice(i, i + 1000));
+    for (let i = 0; i < priceRows.length; i += 1000) await tx.insert(s.securityPriceSnapshots).values(priceRows.slice(i, i + 1000));
+
     await tx.update(s.userProfiles).set({ marginalRate: "0.43410", lastSyncedAt: asOf }).where(eq(s.userProfiles.userId, DEMO_USER_ID));
 
     await recomputeUser(tx, DEMO_USER_ID, today);

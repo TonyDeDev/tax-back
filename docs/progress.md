@@ -180,6 +180,20 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
   prints add up to the saved summary for every year, that registered accounts stay out of gains and
   income, and that the SHOP superficial loss carries its TFSA replacement; plus the CSV writer alone.
 
+### Hub redesign (2026-10-06)
+
+- Layout: a header with sync status, brokerage filter (`?brokerage=`), Refresh, and the one primary "Connect brokerage" button.
+- KPI strip with one featured card (total value and the change since the previous snapshot), then YTD gains, estimated tax, and alerts.
+- Visual row: portfolio value over time (range tabs), allocation by account type (donut with a hatched cash slice and a value legend), and "Needs attention".
+- Accounts by brokerage with subtotals, sync status, a share-of-total bar, and a "Confirm type" tag; investments with sorting, sparklines, weights, a sticky header, a Pooled / By account toggle, and stacked rows below 768px.
+- Value history: migration `0006_value_snapshots` adds `account_value_snapshots` and `security_price_snapshots`, written at the end of every successful sync (`src/server/valuation.ts`).
+  Brokers report no past values, so a real user's chart starts at their first sync.
+  The demo seed writes about 1,000 days of illustrative history replayed from its own ledger and cash flows, ending exactly on today's holdings.
+- Settings: a marginal rate form, which the Hub's "Set marginal rate" link opens.
+- Theme: secondary text is Silver in dark (Fog was 4.46:1 on cards, under WCAG AA) and Steel in light (replacing the off-palette blue-gray); the focus ring is 1px Signal Green (blue in light); new semantic tokens `highlight*` and `chart-*`.
+- The sidebar now shows from 1024px (bottom nav below), and the full desktop grid from 1280px, because the sidebar leaves too little room at tablet widths.
+- Checked in Chrome and Playwright at 390, 640, 820, 1024, 1280, and 1440px in both themes, with no horizontal scroll.
+
 ### Docs
 
 - `docs/dev.md`: developer quick start.
@@ -190,10 +204,8 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 ## Not started
 
 - Phase 1 remainder: data table, alert banner, and a styleguide route.
-- Phase 6 remainder: allocation charts and the account detail page (the Hub does not link to it yet).
-- Phase 7 remainder: Settings (marginal rate, delete my data) and the landing page.
-  Nothing sets `user_profiles.marginal_rate` yet, so the Hub, the Tax Center, and the sale preview all
-  say "needs your marginal tax rate" with no way to give one.
+- Phase 6 remainder: the account detail page (the Hub does not link to it yet).
+- Phase 7 remainder: Settings (delete my data) and the landing page.
 - Phases 9 and 10: quality pass and deploy.
 
 ## Open items
@@ -217,6 +229,10 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 - `package.json` pins `@types/node@^20` while vitest 5 wants `^22 || >=24`. pnpm tolerates the
   mismatch; npm refuses to resolve it without `--legacy-peer-deps`. Worth aligning.
 - Per-transaction overrides (dividend class, return of capital), since SnapTrade cannot tell them apart.
-- Check the security page, the Hub's new cards, and the Tax Center in a real browser. On 2026-10-06 the demo was checked over HTTP only: every page returns 200, and the Hub, alerts, investments, reconciliation, security page, and all three Tax Center years render the seeded data. The Tax Center CSV was downloaded and read end to end. Nothing has been opened in an actual browser, so layout, dark and light, and the 390px width are still unverified.
+- Check the Tax Center and the security page in a real browser; the Hub redesign above covers the Hub.
+  On 2026-10-06 both were checked over HTTP only: every page returns 200, all three Tax Center years
+  render the seeded data, and the CSV was downloaded and read end to end. Layout, dark and light, and
+  the 390px width are still unverified for those two pages.
 - Flag positions whose holdings exceed the known history even without a sale, and prompt for an opening balance.
-- Re-check the Hub at 390px width in a real phone-sized viewport (the automated browser could not narrow below desktop width).
+- The demo's allocation donut uses palette-only colors (Signal Green, LED Green, Fog, Steel, and a hatch); LED Green and Steel sit under 3:1 against the card, so the legend always states every value.
+  A fully colorblind-safe categorical palette would need a color outside DESIGN.md.

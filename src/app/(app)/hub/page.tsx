@@ -1,49 +1,81 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Bell, Briefcase, CircleCheck, PieChart, Scale, TableProperties, TriangleAlert } from "lucide-react";
+import type { ReactNode } from "react";
+import { Briefcase, ExternalLink, TriangleAlert } from "lucide-react";
 import { ConnectSnapTradeButton } from "@/components/auth/connect-snaptrade-button";
 import { EmptyState } from "@/components/empty-state";
+import { AccountRow } from "@/components/hub/account-row";
+import { AllocationDonut } from "@/components/hub/allocation-donut";
+import { AttentionList } from "@/components/hub/attention-list";
+import { BrokerageFilter } from "@/components/hub/brokerage-filter";
+import { type AccountHolding, HoldingsTable, type PooledHolding } from "@/components/hub/holdings-table";
+import { KpiCard } from "@/components/hub/kpi-card";
+import { ValueChart } from "@/components/hub/value-chart";
 import { Money } from "@/components/money";
-import { PageHeader } from "@/components/page-header";
-import { StatCard } from "@/components/stat-card";
-import { AccountTypeSelect } from "@/components/sync/account-type-select";
+import { StatusDot, type StatusTone } from "@/components/status-dot";
 import { FirstSync } from "@/components/sync/first-sync";
-import { RefreshButton } from "@/components/sync/refresh-button";
-import { Badge } from "@/components/ui/badge";
+import { SyncControls } from "@/components/sync/sync-controls";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { formatAgo, formatPercent, formatQuantity } from "@/lib/format";
-import { warningMessage } from "@/lib/warnings";
+import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
+import { formatAgo, formatMoney, formatPercent, formatQuantity, formatShortDate } from "@/lib/format";
+import { type AttentionItem, warningAttention } from "@/lib/warnings";
 import { hasSnapTradeGrant } from "@/server/auth/accounts";
+import { configuredProviders } from "@/server/auth/config";
 import { requireUser } from "@/server/auth/session";
+import { SNAPTRADE_DASHBOARD_URL } from "@/server/auth/snaptrade-provider";
 import { getDb } from "@/server/db";
+import { ensureDemoSeeded } from "@/server/demo/seed";
+import { getEnv } from "@/server/env";
 import {
+  type HubBrokerage,
   type HubSummary,
   type HubSync,
-  type InvestmentRow,
   type ReconciliationSummary,
+  allocationByType,
+  getHoldingsByAccount,
   getHubSummary,
   getInvestments,
   getLastSuccessfulSyncAt,
   getLastSync,
   getReconciliation,
+  getValueHistory,
+  latestChange,
 } from "@/server/queries/hub";
-import { ensureDemoSeeded } from "@/server/demo/seed";
 import { torontoToday } from "@/server/recompute";
 import { SYNC_COOLDOWN_MS } from "@/server/sync/sync";
+import { D } from "@/tax-engine";
+import { yearOf } from "@/tax-engine/dates";
 
 export const metadata: Metadata = { title: "Hub" };
 // Refresh and the first sync run as server actions on this page; they read every brokerage account.
 export const maxDuration = 300;
 
-function refreshState(lastSync: HubSync, lastSuccessAt: Date | null, now: Date) {
+const first = (value: string | string[] | undefined) => (Array.isArray(value) ? value[0] : value);
+
+function syncState(lastSync: HubSync | null, lastSuccessAt: Date | null, now: Date, isDemo: boolean) {
+  if (isDemo) return { status: "Sample data", tone: "positive" as StatusTone, running: false, disabledReason: undefined };
+  if (!lastSync) return { status: "Not synced yet", tone: "neutral" as StatusTone, running: false, disabledReason: undefined };
   const status = lastSuccessAt ? `Synced ${formatAgo(lastSuccessAt, now)}` : "Not synced yet";
-  if (lastSync.status === "running") return { status, disabledReason: "A sync is running." };
+  const tone: StatusTone = lastSync.status === "failed" ? "negative" : "positive";
+  if (lastSync.status === "running") return { status: "Syncing...", tone, running: true, disabledReason: "A sync is running." };
   if (lastSync.status === "succeeded") {
     const minutes = Math.ceil((lastSync.startedAt.getTime() + SYNC_COOLDOWN_MS - now.getTime()) / 60_000);
-    if (minutes > 0) return { status, disabledReason: `You can refresh again in ${minutes} min.` };
+    if (minutes > 0) return { status, tone, running: false, disabledReason: `You can refresh again in ${minutes} min.` };
   }
-  return { status, disabledReason: null };
+  return { status, tone, running: false, disabledReason: null };
+}
+
+function HubHeader({ actions }: { actions?: ReactNode }) {
+  return (
+    <header className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+      <div className="flex min-w-0 flex-col gap-1">
+        <h1 className="font-display text-heading-sm font-semibold md:text-heading">Hub</h1>
+        <p className="text-body-sm text-muted-foreground">Every account in one place, with Canadian tax insight.</p>
+      </div>
+      {actions ? <div className="flex flex-wrap items-center gap-3 xl:justify-end">{actions}</div> : null}
+    </header>
+  );
 }
 
 function SyncProblem({ sync }: { sync: HubSync }) {
@@ -63,204 +95,139 @@ function SyncProblem({ sync }: { sync: HubSync }) {
   );
 }
 
-function Summary({ summary }: { summary: HubSummary | null }) {
-  const alerts = (summary?.warnings.length ?? 0) + (summary?.unconfirmedAccounts ? 1 : 0);
+/** Every item the "Needs attention" card lists; the Alerts count is its length. */
+function attentionItems(summary: HubSummary, reconciliation: ReconciliationSummary): AttentionItem[] {
+  const broken = summary.brokerages.filter((b) => b.status === "broken");
+  return [
+    ...broken.map((b) => ({
+      tone: "negative" as const,
+      text: `${b.name} needs to be reconnected`,
+      href: SNAPTRADE_DASHBOARD_URL,
+      linkLabel: "Open SnapTrade",
+    })),
+    ...(summary.unconfirmedAccounts > 0
+      ? [
+          {
+            tone: "negative" as const,
+            text: `${summary.unconfirmedAccounts} ${summary.unconfirmedAccounts === 1 ? "account type" : "account types"} to confirm`,
+            href: "#accounts",
+            linkLabel: "Confirm below",
+          },
+        ]
+      : []),
+    ...reconciliation.gaps.map((g) => ({
+      tone: "negative" as const,
+      text: `${g.symbol}: ledger ${formatQuantity(g.ledgerQuantity)}, broker ${formatQuantity(g.brokerQuantity)} units${
+        g.accountName ? ` (${g.accountName})` : ""
+      }`,
+      href: `/hub/securities/${g.securityId}#opening`,
+      linkLabel: g.status === "broker_has_more" ? "Add opening balance" : "Review",
+    })),
+    ...summary.warnings.map(warningAttention),
+  ];
+}
+
+function ConnectCta({ isDemo }: { isDemo: boolean }) {
+  if (isDemo) {
+    return (
+      <Link href="/sign-in" className={buttonVariants({ size: "sm" })}>
+        Connect brokerage
+      </Link>
+    );
+  }
+  // Brokerages are added in the SnapTrade Dashboard; the next refresh picks them up.
   return (
-    <section aria-label="Summary" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      <StatCard
-        label="Total value"
-        value={<Money value={summary?.totalValueCad ?? 0} />}
-        hint={summary?.totalIncomplete ? "Some accounts could not be converted to CAD" : "Holdings and cash, in CAD"}
-      />
-      <StatCard label="YTD realized gains" value={<Money value={summary?.ytdGainCad ?? 0} signed />} hint="Non-registered accounts" />
-      <StatCard
-        label="Estimated tax"
-        value={summary?.estimatedTaxCad ? <Money value={summary.estimatedTaxCad} /> : "Not set"}
-        hint={summary?.estimatedTaxCad ? "On capital gains only" : "Needs your marginal tax rate"}
-      />
-      <StatCard label="Alerts" value={String(alerts)} />
+    <a href={SNAPTRADE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className={buttonVariants({ size: "sm" })}>
+      Connect brokerage
+      <ExternalLink aria-hidden className="size-4" />
+      <span className="sr-only">(opens SnapTrade in a new tab)</span>
+    </a>
+  );
+}
+
+function BrokerageSection({ brokerage: b, totalCad, readOnly }: { brokerage: HubBrokerage; totalCad: string; readOnly: boolean }) {
+  const total = Number(totalCad);
+  const broken = b.status === "broken";
+  return (
+    <section aria-label={b.name} className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <h3 className="truncate font-sans text-body font-medium">{b.name}</h3>
+          <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
+            <StatusDot tone={broken ? "negative" : "positive"} />
+            {broken ? "Needs reconnect" : "Synced"}
+          </span>
+        </div>
+        <div className="flex items-center gap-3">
+          {broken && (
+            <a
+              href={SNAPTRADE_DASHBOARD_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Reconnect
+              <ExternalLink aria-hidden className="size-4" />
+              <span className="sr-only">(opens SnapTrade in a new tab)</span>
+            </a>
+          )}
+          <span className="font-mono text-body-sm font-medium tabular-nums">
+            <span className="sr-only">Subtotal </span>
+            {formatMoney(b.totalCad)}
+            {b.totalIncomplete && <span className="text-muted-foreground"> + unconverted</span>}
+          </span>
+        </div>
+      </div>
+      {broken && b.statusDetail && <p className="px-1 text-caption text-muted-foreground">{b.statusDetail}</p>}
+      <ul className="flex flex-col divide-y divide-border rounded-md border">
+        {b.accounts.map((a) => (
+          <AccountRow
+            key={a.id}
+            account={a}
+            share={a.valueCad === null ? null : total > 0 ? Number(a.valueCad) / total : 0}
+            readOnly={readOnly}
+          />
+        ))}
+      </ul>
     </section>
   );
 }
 
-function Alerts({ summary }: { summary: HubSummary }) {
-  const items = [
-    ...(summary.unconfirmedAccounts > 0
-      ? [
-          `${summary.unconfirmedAccounts} ${summary.unconfirmedAccounts === 1 ? "account needs its" : "accounts need their"} type confirmed below. TaxBack guessed it from the broker, and the type decides what is taxable.`,
-        ]
-      : []),
-    ...summary.warnings.map(warningMessage),
-  ];
-  if (items.length === 0) return <EmptyState icon={Bell} title="Nothing needs attention" />;
+function NotConnected() {
   return (
-    <ul className="flex flex-col divide-y divide-border">
-      {items.map((text, i) => (
-        <li key={i} className="flex items-start gap-2 py-3 first:pt-0 last:pb-0">
-          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <span className="text-body-sm">{text}</span>
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Accounts({ summary, readOnly }: { summary: HubSummary; readOnly: boolean }) {
-  if (summary.brokerages.length === 0) {
-    return (
-      <EmptyState
-        icon={Briefcase}
-        title="No investment accounts found"
-        description="SnapTrade did not share any investment accounts. Add a brokerage in your SnapTrade account, then refresh."
-      />
-    );
-  }
-  return (
-    <div className="flex flex-col gap-6">
-      {summary.brokerages.map((b) => (
-        <section key={b.id} aria-label={b.name} className="flex flex-col gap-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-body font-medium">{b.name}</h3>
-            {b.status === "broken" && <Badge variant="negative">Needs attention</Badge>}
-          </div>
-          {b.status === "broken" && b.statusDetail && (
-            <p className="text-caption text-muted-foreground">{b.statusDetail}</p>
-          )}
-          <ul className="flex flex-col divide-y divide-border rounded-md border">
-            {b.accounts.map((a) => (
-              // Phones: name and value on one line, the type picker below. Wider: name | picker | value.
-              <li
-                key={a.id}
-                className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-2 px-4 py-3 sm:grid-cols-[minmax(0,1fr)_14rem_7rem]"
-              >
-                <div className="flex min-w-0 flex-col">
-                  <span className="truncate text-body-sm font-medium">{a.name}</span>
-                  {a.numberMasked && (
-                    <span className="font-mono text-caption text-muted-foreground">
-                      <span className="sr-only">Account ending in </span>
-                      <span aria-hidden>•••• </span>
-                      {a.numberMasked}
-                    </span>
-                  )}
-                </div>
-                <span className="text-right text-body-sm sm:order-last">
-                  {a.valueCad === null ? <span className="text-muted-foreground">No CAD rate</span> : <Money value={a.valueCad} />}
-                </span>
-                <div className="col-span-2 sm:col-span-1">
-                  {a.kind === "cash" ? (
-                    <Badge variant="outline" title="Holds cash only, so it never affects capital gains.">
-                      Cash account
-                    </Badge>
-                  ) : (
-                    <AccountTypeSelect accountId={a.id} accountName={a.name} value={a.accountType} confirmed={a.confirmed} readOnly={readOnly} />
-                  )}
-                </div>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-function Investments({ rows }: { rows: InvestmentRow[] }) {
-  if (rows.length === 0) return <EmptyState icon={TableProperties} title="No investments to show" />;
-  return (
-    <div className="overflow-x-auto rounded-md border">
-      <table className="w-full min-w-[40rem] text-body-sm tabular-nums">
-        <thead className="text-caption text-muted-foreground">
-          <tr className="border-b">
-            <th className="px-3 py-2 text-left font-medium">Security</th>
-            <th className="px-3 py-2 text-right font-medium">Units, all accounts</th>
-            <th className="px-3 py-2 text-right font-medium">Market value</th>
-            <th className="px-3 py-2 text-right font-medium">Non-registered units</th>
-            <th className="px-3 py-2 text-right font-medium">Pooled ACB</th>
-            <th className="px-3 py-2 text-right font-medium">Unrealized</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.securityId} className="border-b last:border-0 hover:bg-accent/50">
-              <td className="px-3 py-2">
-                <Link href={`/hub/securities/${r.securityId}`} className="font-medium text-link hover:underline">
-                  {r.symbol}
-                </Link>
-                {r.name && <span className="block max-w-[14rem] truncate text-caption text-muted-foreground">{r.name}</span>}
-              </td>
-              <td className="px-3 py-2 text-right">{formatQuantity(r.brokerQuantity)}</td>
-              <td className="px-3 py-2 text-right">{r.marketValueCad ? <Money value={r.marketValueCad} /> : "-"}</td>
-              <td className="px-3 py-2 text-right">{formatQuantity(r.pooledQuantity)}</td>
-              <td className="px-3 py-2 text-right">
-                {r.totalAcbCad ? (
-                  <Link href={`/hub/securities/${r.securityId}#audit`} className="hover:underline" title="See how this ACB was built">
-                    <Money value={r.totalAcbCad} />
-                  </Link>
-                ) : (
-                  "-"
-                )}
-              </td>
-              <td className="px-3 py-2 text-right">{r.unrealizedCad ? <Money value={r.unrealizedCad} signed className="justify-end" /> : "-"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function LedgerVsBroker({ summary }: { summary: ReconciliationSummary }) {
-  if (summary.total === 0) return <EmptyState icon={Scale} title="Nothing to compare yet" description="Positions are compared after the first sync." />;
-  const share = summary.matched / summary.total;
-  return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center gap-3">
-        {summary.gaps.length === 0 ? (
-          <CircleCheck aria-hidden className="size-6 shrink-0 text-positive" />
-        ) : (
-          <TriangleAlert aria-hidden className="size-6 shrink-0 text-negative" />
-        )}
-        <p className="text-body">
-          Ledger matches broker positions: <strong className="tabular-nums">{formatPercent(share, share === 1 ? 0 : 1)}</strong>{" "}
-          <span className="text-muted-foreground tabular-nums">
-            ({summary.matched} of {summary.total})
-          </span>
+    <Card className="mx-auto flex w-full max-w-lg flex-col items-center gap-4 px-6 py-12 text-center">
+      <Briefcase aria-hidden className="size-6 text-muted-foreground" />
+      <div className="flex flex-col gap-2">
+        <h2 className="font-display text-heading-sm font-semibold">Connect your first brokerage</h2>
+        <p className="text-body-sm text-muted-foreground">
+          TaxBack reads your accounts through SnapTrade, read-only, and pools your cost basis across every brokerage. Connect
+          your free SnapTrade account to see your Hub.
         </p>
       </div>
-      {summary.gaps.length > 0 && (
-        <ul className="flex flex-col divide-y divide-border rounded-md border">
-          {summary.gaps.map((g, i) => (
-            <li key={i} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <span className="text-body-sm">
-                <Link href={`/hub/securities/${g.securityId}`} className="font-medium text-link hover:underline">
-                  {g.symbol}
-                </Link>{" "}
-                <span className="text-muted-foreground">{g.accountName ?? "non-registered, pooled"}</span>
-              </span>
-              <span className="text-body-sm tabular-nums text-muted-foreground">
-                Ledger {formatQuantity(g.ledgerQuantity)} · Broker {formatQuantity(g.brokerQuantity)} ·{" "}
-                {g.status === "broker_has_more" ? (
-                  <Link href={`/hub/securities/${g.securityId}#opening`} className="text-link hover:underline">
-                    {g.accountName ? "history missing" : "add an opening balance"}
-                  </Link>
-                ) : (
-                  "units unaccounted for"
-                )}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </div>
+      <ConnectSnapTradeButton label="Connect brokerage" callbackURL="/hub" disabled={!configuredProviders(getEnv()).snaptrade} />
+    </Card>
   );
 }
 
-export default async function Hub() {
+export default async function Hub(props: PageProps<"/hub">) {
   const user = await requireUser("/hub");
+  const params = await props.searchParams;
   const db = getDb();
   const connected = !user.isDemo && (await hasSnapTradeGrant(db, user.id));
   const lastSync = connected ? await getLastSync(db, user.id) : null;
   const today = torontoToday();
+  const year = yearOf(today);
+  const now = new Date();
+
+  if (!user.isDemo && !connected) {
+    return (
+      <>
+        <HubHeader />
+        <NotConnected />
+      </>
+    );
+  }
+
   // The demo has no SnapTrade grant; its portfolio is seeded instead, on the first visit if the cron has not run yet.
   let demoReady = false;
   if (user.isDemo) {
@@ -271,65 +238,186 @@ export default async function Hub() {
       console.error("[demo] seeding failed", error);
     }
   }
-  const [summary, lastSuccessAt, investments, reconciliation] =
-    demoReady || (connected && lastSync)
-      ? await Promise.all([
-          getHubSummary(db, user.id, today),
-          getLastSuccessfulSyncAt(db, user.id),
-          getInvestments(db, user.id, today),
-          getReconciliation(db, user.id),
-        ])
-      : [null, null, null, null];
-  const now = new Date();
+  const hasData = demoReady || lastSync !== null;
+  const [summary, lastSuccessAt, reconciliation] = hasData
+    ? await Promise.all([getHubSummary(db, user.id, today), getLastSuccessfulSyncAt(db, user.id), getReconciliation(db, user.id)])
+    : [null, null, null];
+
+  const selected = summary?.brokerages.find((b) => b.id === first(params.brokerage)) ?? null;
+  const shown = selected ? [selected] : (summary?.brokerages ?? []);
+  const accountIds = selected ? selected.accounts.map((a) => a.id) : undefined;
+  const [history, investments, byAccount] = summary
+    ? await Promise.all([
+        getValueHistory(db, user.id, accountIds),
+        getInvestments(db, user.id, today, accountIds),
+        getHoldingsByAccount(db, user.id, today, accountIds),
+      ])
+    : [[], [], []];
+
+  const sync = syncState(lastSync, lastSuccessAt, now, user.isDemo);
+  const header = (
+    <HubHeader
+      actions={
+        <>
+          <SyncControls status={sync.status} tone={sync.tone} running={sync.running} disabledReason={sync.disabledReason}>
+            {summary && <BrokerageFilter brokerages={summary.brokerages} selected={selected?.id ?? null} />}
+          </SyncControls>
+          <ConnectCta isDemo={user.isDemo} />
+        </>
+      }
+    />
+  );
+
+  if (!summary || !reconciliation) {
+    return (
+      <>
+        {header}
+        {connected && !lastSync ? (
+          <FirstSync />
+        ) : (
+          <EmptyState icon={Briefcase} title="The demo portfolio is on its way" description="Reload the page in a moment." />
+        )}
+      </>
+    );
+  }
+
+  const totalCad = selected ? selected.totalCad : summary.totalValueCad;
+  const totalIncomplete = selected ? selected.totalIncomplete : summary.totalIncomplete;
+  const change = latestChange(history);
+  const attention = attentionItems(summary, reconciliation);
+  const needAction = attention.filter((a) => a.tone === "negative").length;
+  const weightOf = (value: string | null) =>
+    value === null || new D(totalCad).isZero() ? null : new D(value).div(totalCad).toFixed(6);
+  const pooled: PooledHolding[] = investments.map((r) => ({
+    securityId: r.securityId,
+    symbol: r.symbol,
+    name: r.name,
+    brokerQuantity: r.brokerQuantity,
+    marketValueCad: r.marketValueCad,
+    pooledQuantity: r.pooledQuantity,
+    totalAcbCad: r.totalAcbCad,
+    unrealizedCad: r.unrealizedCad,
+    trend: r.trend,
+    weight: weightOf(r.marketValueCad),
+  }));
+  const perAccount: AccountHolding[] = byAccount.map((r) => ({
+    ...r,
+    accountTypeLabel: ACCOUNT_TYPE_LABELS[r.accountType],
+    weight: weightOf(r.marketValueCad),
+  }));
+  const matchShare = reconciliation.total === 0 ? null : reconciliation.matched / reconciliation.total;
+  const scope = selected ? `${selected.name} only` : "All brokerages";
 
   return (
     <>
-      <PageHeader
-        title="Hub"
-        description="Every account in one place, with Canadian tax insight."
-        actions={lastSync ? <RefreshButton {...refreshState(lastSync, lastSuccessAt, now)} /> : undefined}
-      />
-
-      {connected && !lastSync && <FirstSync />}
+      {header}
       {lastSync?.status === "failed" && <SyncProblem sync={lastSync} />}
 
-      <Summary summary={summary} />
+      <section aria-label="Summary" className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <KpiCard
+          featured
+          label="Total value"
+          value={<Money value={totalCad} />}
+          href="#accounts"
+          hrefLabel="Jump to accounts"
+          caption={
+            <div className="flex flex-col gap-0.5">
+              <span>{totalIncomplete ? "Some accounts could not be converted to CAD" : `Holdings and cash, in CAD${selected ? `, ${selected.name}` : ""}`}</span>
+              {change && Number(change.changeCad) !== 0 && (
+                <span className="flex flex-wrap items-center gap-x-1">
+                  <Money value={change.changeCad} signed className="font-medium" />
+                  <span>since {formatShortDate(change.sinceDay)}</span>
+                </span>
+              )}
+            </div>
+          }
+        />
+        <KpiCard
+          label="YTD realized gains"
+          value={<Money value={summary.ytdGainCad} signed />}
+          caption={`Non-registered accounts, ${year}${selected ? ", all brokerages" : ""}`}
+          href={`/tax/${year}`}
+          hrefLabel={`Open the ${year} Tax Center`}
+        />
+        <KpiCard
+          label="Estimated tax"
+          value={summary.estimatedTaxCad === null ? "Not set" : <Money value={summary.estimatedTaxCad} />}
+          caption={
+            summary.estimatedTaxCad === null ? (
+              user.isDemo ? (
+                "Needs your marginal tax rate"
+              ) : (
+                <Link href="/settings#marginal-rate" className="text-link hover:underline">
+                  Set marginal rate <span aria-hidden>→</span>
+                </Link>
+              )
+            ) : (
+              `On ${year} capital gains at ${formatPercent(summary.marginalRate ?? 0, 2)}`
+            )
+          }
+          href={`/tax/${year}`}
+          hrefLabel={`Open the ${year} Tax Center`}
+        />
+        <KpiCard
+          label="Alerts"
+          value={
+            <span className="flex items-center gap-3">
+              <StatusDot tone={needAction > 0 ? "negative" : "positive"} className="size-2.5" />
+              {attention.length}
+            </span>
+          }
+          caption={
+            attention.length === 0 ? "Nothing needs attention" : needAction > 0 ? `${needAction} need your action` : "For your information"
+          }
+          href="#attention"
+          hrefLabel="Jump to what needs attention"
+        />
+      </section>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Alerts</CardTitle>
-          <CardDescription>Superficial losses, missing history, and accounts to confirm.</CardDescription>
-        </CardHeader>
-        <CardContent>{summary ? <Alerts summary={summary} /> : <EmptyState icon={Bell} title="Nothing needs attention" />}</CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-12">
+        <Card className="min-w-0 md:col-span-2 xl:col-span-5">
+          <CardHeader className="pb-4 md:pb-4">
+            <CardTitle>Portfolio value</CardTitle>
+            <CardDescription>{scope}, from daily syncs</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <ValueChart points={history} today={today} />
+          </CardContent>
+        </Card>
+        <Card className="min-w-0 xl:col-span-4">
+          <CardHeader className="pb-4 md:pb-4">
+            <CardTitle>Allocation by account type</CardTitle>
+            <CardDescription>{scope}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AllocationDonut slices={allocationByType(shown)} totalCad={totalCad} />
+          </CardContent>
+        </Card>
+        <Card id="attention" className="min-w-0 scroll-mt-12 xl:col-span-3">
+          <CardHeader className="pb-4 md:pb-4">
+            <CardTitle>Needs attention</CardTitle>
+            <CardDescription>All brokerages</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <AttentionList items={attention} />
+          </CardContent>
+        </Card>
+      </div>
 
-      <Card>
+      <Card id="accounts" className="scroll-mt-12">
         <CardHeader>
-          <CardTitle>Accounts</CardTitle>
-          <CardDescription>Grouped by brokerage. Confirm each account&apos;s type so the tax numbers are right.</CardDescription>
+          <CardTitle>Accounts by brokerage</CardTitle>
+          <CardDescription>Confirm each account&apos;s type: it decides what is taxable.</CardDescription>
         </CardHeader>
-        <CardContent>
-          {summary ? (
-            <Accounts summary={summary} readOnly={user.isDemo} />
-          ) : (
+        <CardContent className="flex flex-col gap-6">
+          {shown.length === 0 ? (
             <EmptyState
               icon={Briefcase}
-              title={connected ? "Waiting for the first sync" : "No accounts yet"}
-              description={
-                connected
-                  ? "Your accounts show up here once SnapTrade has been read."
-                  : user.isDemo
-                    ? "The demo portfolio is on its way."
-                    : "Connect your SnapTrade account to see your brokerages here."
-              }
-              action={
-                connected || user.isDemo ? undefined : (
-                  <Link href="/settings" className={buttonVariants({ size: "sm" })}>
-                    Go to Settings
-                  </Link>
-                )
-              }
+              title="No investment accounts found"
+              description="SnapTrade did not share any investment accounts. Add a brokerage in your SnapTrade account, then refresh."
             />
+          ) : (
+            shown.map((b) => <BrokerageSection key={b.id} brokerage={b} totalCad={totalCad} readOnly={user.isDemo} />)
           )}
         </CardContent>
       </Card>
@@ -337,30 +425,33 @@ export default async function Hub() {
       <Card>
         <CardHeader>
           <CardTitle>Investments</CardTitle>
-          <CardDescription>Pooled by security. Select a security or its ACB for the full audit trail.</CardDescription>
+          <CardDescription>
+            {selected
+              ? `Units and value at ${selected.name}. Non-registered units and ACB stay pooled across every brokerage.`
+              : "Pooled by security across every brokerage, or one row per account. Select a row for its ACB audit trail."}
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          {investments ? <Investments rows={investments} /> : <EmptyState icon={TableProperties} title="No investments to show" />}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Ledger vs broker</CardTitle>
-          <CardDescription>Your full history replayed, then compared with the units each broker reports holding today.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {reconciliation ? <LedgerVsBroker summary={reconciliation} /> : <EmptyState icon={Scale} title="Nothing to compare yet" />}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Allocation</CardTitle>
-          <CardDescription>By security, account type, and currency.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <EmptyState icon={PieChart} title="No allocation data yet" />
+          <HoldingsTable
+            pooled={pooled}
+            byAccount={perAccount}
+            aside={
+              matchShare === null ? null : (
+                <p className="flex items-center gap-2 text-caption text-muted-foreground">
+                  <StatusDot tone={reconciliation.gaps.length === 0 ? "positive" : "negative"} />
+                  <span>
+                    Ledger matches broker positions:{" "}
+                    <strong className="font-mono font-medium tabular-nums text-foreground">
+                      {formatPercent(matchShare, matchShare === 1 ? 0 : 1)}
+                    </strong>{" "}
+                    <span className="tabular-nums">
+                      ({reconciliation.matched} of {reconciliation.total})
+                    </span>
+                  </span>
+                </p>
+              )
+            }
+          />
         </CardContent>
       </Card>
     </>

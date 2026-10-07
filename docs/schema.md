@@ -27,6 +27,7 @@ Migrations are generated into `drizzle/` with `pnpm db:generate` and applied wit
 | Brokerage data | `connections`, `brokerage_accounts`, `securities` (global), `transactions`, `holdings`, `account_balances` |
 | User input | `manual_adjustments` (opening quantity and ACB), `corporate_actions` (spinoffs and mergers), `security_preferences` (listing links and dividend class) |
 | Reference | `fx_rates` (Bank of Canada, global) |
+| Value history | `account_value_snapshots` (each account's CAD value per sync day), `security_price_snapshots` (CAD price per held security per sync day, per user so demo prices never reach real users) |
 | Operational | `sync_runs` |
 | Derived | `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `superficial_loss_replacements`, `income_events`, `harvest_opportunities`, `tax_year_summaries`, `tax_warnings`, `position_reconciliations` |
 
@@ -43,6 +44,8 @@ erDiagram
   securities ||--o{ holdings : of
   users ||--o{ manual_adjustments : confirms
   users ||--o{ sync_runs : triggers
+  brokerage_accounts ||--o{ account_value_snapshots : "valued daily"
+  users ||--o{ security_price_snapshots : "priced daily"
   users ||--o{ acb_positions : derived
   users ||--o{ acb_events : derived
   transactions ||--o{ realized_gains : produces
@@ -113,6 +116,8 @@ These hold for code not yet written; each is a way the schema alone cannot stop 
 | Account detail: activity, newest first | `idx_transactions_account_date` |
 | Security detail: ACB breakdown in order | `acb_events_pkey` |
 | Security detail: corporate actions, either side | `idx_corporate_actions_security`, `idx_corporate_actions_target` |
+| Hub: value over time, optionally per brokerage | `idx_account_value_snapshots_user_day` |
+| Hub: sparklines, last 90 days | `security_price_snapshots_pkey` (leads with `user_id`) |
 | Hub: ledger vs broker | `position_reconciliations_key` (leads with `user_id`) |
 | Security detail and recompute: ledger by user | `idx_transactions_user_security_date` |
 | Tax Center year | `idx_realized_gains_user_year`, `idx_income_events_user_year`, `idx_superficial_losses_user_year`, `tax_year_summaries_pkey` |
