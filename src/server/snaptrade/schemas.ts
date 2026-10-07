@@ -105,7 +105,8 @@ export const activitySchema = z.object({
   units: z.number().nullish(),
   fee: z.number().nullish(),
   trade_date: z.string().nullish(),
-  settlement_date: z.string(),
+  /** Null on everything but trades: a dividend or a fee has no settlement. `parse` falls back to the trade date. */
+  settlement_date: z.string().nullish(),
   description: z.string().nullish(),
 });
 export type SnapTradeActivity = z.infer<typeof activitySchema>;

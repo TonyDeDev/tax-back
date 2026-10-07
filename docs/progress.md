@@ -105,6 +105,11 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
   Generic broker names are replaced from SnapTrade's detailed type, so a Wealthsimple savings account shows as "Savings" rather than "Personal".
 - Triggers: first sync after the grant (Hub and Settings), the Refresh button, and the daily cron (`/api/cron/sync`, which also deletes expired sessions).
 - Tested on PGlite with SnapTrade and the Bank of Canada stubbed, and run once against a real Wealthsimple connection.
+- 2026-10-06: run end to end against a live SnapTrade Test OAuth app and the SnapTrade Sandbox brokerage.
+  "Continue with SnapTrade" signs in, grants access, and syncs in one consent; 3 accounts, 18
+  transactions, and 12 holdings landed, the IRA was guessed as `us_retirement`, and a position with no
+  purchase history raised `opening_balance_needed`. This found the null `settlement_date` bug and the
+  dropped activity types listed under Open items.
 
 ### Phase 6 (partial) - Hub with real data
 
@@ -160,6 +165,21 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 - `pnpm db:seed` runs it; the daily cron resets it; the Hub seeds it on the first demo visit if neither has run.
 - The Hub shows the demo's data, read-only.
 
+### Phase 7 (partial) - Tax Center (2026-10-06)
+
+- `src/server/queries/tax.ts`: the year list, and one read per year covering the summary, the realized
+  gains, the superficial losses with their replacement purchases, the dividends, and the harvesting
+  opportunities. Derived rows already carry canonical security ids, so each one links to its security page.
+- `src/app/(app)/tax/[year]/page.tsx`: summary tiles, realized gains in the Schedule 3 order with a
+  totals row, superficial losses with their 30-day windows and what happened to the denied amount,
+  dividends by security and class, and harvesting for the year in progress.
+- `/tax` redirects to the newest year with results, and the nav points there instead of a fixed 2026.
+- `src/lib/tax-csv.ts` and `/tax/[year]/export`: a CSV per year, a section per table, totals taken from
+  the saved year summary so the export never recomputes tax. Works in the read-only demo.
+- Tests (293 total): the read queries over the seeded demo on PGlite, checking that the rows the page
+  prints add up to the saved summary for every year, that registered accounts stay out of gains and
+  income, and that the SHOP superficial loss carries its TFSA replacement; plus the CSV writer alone.
+
 ### Docs
 
 - `docs/dev.md`: developer quick start.
@@ -170,14 +190,26 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 ## Not started
 
 - Phase 1 remainder: data table, alert banner, and a styleguide route.
-- Phase 3 remainder: page read queries for the Tax Center.
 - Phase 6 remainder: allocation charts and the account detail page (the Hub does not link to it yet).
-- Phase 7: Tax Center, Settings (marginal rate, delete my data), landing page.
+- Phase 7 remainder: Settings (marginal rate, delete my data) and the landing page.
+  Nothing sets `user_profiles.marginal_rate` yet, so the Hub, the Tax Center, and the sale preview all
+  say "needs your marginal tax rate" with no way to give one.
 - Phases 9 and 10: quality pass and deploy.
 
 ## Open items
 
-- Create the SnapTrade Test OAuth app and the Google OAuth client and add their credentials by hand (`docs/setup.md`), then test both sign-ins and "Connect with SnapTrade" end to end.
+- **Activity types SnapTrade reports that the mapper drops.** Found on 2026-10-06 against the SnapTrade
+  Sandbox, which returns one of almost every type. Each is counted in `sync_runs.stats.skipped` but
+  raises no warning, so the numbers look complete when they are not:
+  - ~~`RETURN_OF_CAPITAL`~~ and ~~`INTERNAL_ASSET_TRANSFER_IN` / `_OUT`~~ were mapped on 2026-10-06.
+  - `REVERSE_SPLIT` is not mapped, so quantities after one are wrong.
+  - A `TAX` withholding row only attaches to a dividend on the same security *and* the same settlement
+    date. The sandbox puts them on different dates, so the withholding was dropped.
+  - `SPLIT` is skipped when no position is known, because the ratio comes from the unit delta and needs
+    the quantity before it. Correct, but silent; it should ask for an opening balance.
+  - `SPINOFF` and `STOCK_MERGER` are skipped by design: the user enters those as corporate actions.
+- Google OAuth client: still unconfigured, so "Continue with Google" is disabled. Not needed for
+  SnapTrade sign-in or the demo.
 - A "Disconnect SnapTrade" action should revoke the refresh token at SnapTrade before unlinking (Better Auth's unlink alone does not revoke).
 - Re-check SnapTrade OAuth pricing before launch: the free preview is expected to last a few months.
 - Verify the 2019-2026 dividend rates against CRA.
@@ -185,6 +217,6 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
 - `package.json` pins `@types/node@^20` while vitest 5 wants `^22 || >=24`. pnpm tolerates the
   mismatch; npm refuses to resolve it without `--legacy-peer-deps`. Worth aligning.
 - Per-transaction overrides (dividend class, return of capital), since SnapTrade cannot tell them apart.
-- Check the security page and the Hub's new cards in a real browser. On 2026-10-06 the demo was checked over HTTP only: every page returns 200 and the Hub, alerts, investments, reconciliation, and MSFT security page render the seeded data.
+- Check the security page, the Hub's new cards, and the Tax Center in a real browser. On 2026-10-06 the demo was checked over HTTP only: every page returns 200, and the Hub, alerts, investments, reconciliation, security page, and all three Tax Center years render the seeded data. The Tax Center CSV was downloaded and read end to end. Nothing has been opened in an actual browser, so layout, dark and light, and the 390px width are still unverified.
 - Flag positions whose holdings exceed the known history even without a sale, and prompt for an opening balance.
 - Re-check the Hub at 390px width in a real phone-sized viewport (the automated browser could not narrow below desktop width).

@@ -267,6 +267,39 @@ describe("mapActivities", () => {
     expect(transactions[0]!.fees.toString()).toBe("9.99");
   });
 
+  /*
+   * Shares moved between the user's own accounts at one broker. Skipping these used to lose the deemed
+   * disposition when the destination was a TFSA or an RRSP, so the direction comes from the type name.
+   */
+  it("maps internal asset transfers, which move shares between the user's own accounts", () => {
+    const { transactions, skipped } = mapActivities([
+      activity({ type: "INTERNAL_ASSET_TRANSFER_OUT", units: -1, price: 170, amount: -170 }),
+      activity({ type: "INTERNAL_ASSET_TRANSFER_IN", units: 1, price: 170, amount: 170 }),
+    ]);
+    expect(transactions.map((t) => [t.kind, t.quantity.toString(), t.price.toString()])).toEqual([
+      ["transfer_out", "1", "170"],
+      ["transfer_in", "1", "170"],
+    ]);
+    expect(skipped).toEqual({});
+  });
+
+  it("maps a return of capital, which lowers ACB instead of being income", () => {
+    const { transactions } = mapActivities([
+      activity({ type: "RETURN_OF_CAPITAL", amount: 8, units: 0, price: 0, settlement_date: null, trade_date: "2026-09-22T12:00:00Z" }),
+    ]);
+    expect(transactions).toHaveLength(1);
+    expect(transactions[0]).toMatchObject({ kind: "roc", settlementDate: "2026-09-22" });
+    expect(transactions[0]!.amount.toString()).toBe("8");
+    expect(transactions[0]!.quantity.toString()).toBe("0");
+  });
+
+  it("skips a reversed return of capital rather than feeding the engine a negative one", () => {
+    // The engine refuses a negative return of capital, so it must never reach the ledger.
+    const { transactions, skipped } = mapActivities([activity({ type: "RETURN_OF_CAPITAL", amount: -8 })]);
+    expect(transactions).toEqual([]);
+    expect(skipped).toEqual({ RETURN_OF_CAPITAL_REVERSAL: 1 });
+  });
+
   it("counts cash movements, interest, and options as skipped", () => {
     const { transactions, skipped } = mapActivities([
       activity({ type: "CONTRIBUTION", symbol: null, amount: 1000 }),
@@ -287,8 +320,57 @@ describe("mapActivities", () => {
     expect(mapActivities([]).earliestDate).toBeNull();
   });
 
-  it("fails loudly when a stored activity type has an unexpected shape", () => {
+  it("fails loudly when a stored activity type has an unexpected shape, naming the field", () => {
     expect(() => mapActivities([activity({ type: "BUY", units: "lots" })])).toThrow(/unexpected shape/);
+    // The message has to say which field, or the next shape surprise costs a probe to diagnose.
+    expect(() => mapActivities([activity({ type: "BUY", units: "lots" })])).toThrow(/units: .*expected number/);
+  });
+
+  /*
+   * SnapTrade sets `settlement_date` only on trades. Everything else - dividends, fees, splits,
+   * transfers - comes back with it null, which used to fail the whole sync on the first one.
+   */
+  it("falls back to the trade date when SnapTrade sends no settlement date", () => {
+    const [dividend] = mapActivities([
+      activity({ type: "DIVIDEND", amount: 12.5, settlement_date: null, trade_date: "2026-04-09T13:30:00Z" }),
+    ]).transactions;
+    expect(dividend).toMatchObject({ kind: "dividend", settlementDate: "2026-04-09", tradeDate: "2026-04-09" });
+  });
+
+  it("skips a cash transfer with no security instead of failing the sync", () => {
+    // The exact shape SnapTrade returns for a sandbox cash transfer: no symbol, no units, no settlement.
+    const { transactions, skipped } = mapActivities([
+      {
+        id: "cbb3d62b-e2cc-4722-a333-0e5034927e41",
+        symbol: null,
+        option_symbol: null,
+        currency: { code: "USD", name: "US Dollar", id: "cur-usd" },
+        type: "TRANSFER",
+        description: "Cash transfer",
+        amount: 1000,
+        price: 0,
+        units: 0,
+        fee: 0,
+        settlement_date: null,
+        trade_date: "2026-09-30T23:54:32.607825Z",
+      },
+    ]);
+    expect(transactions).toEqual([]);
+    expect(skipped).toEqual({ TRANSFER: 1 });
+  });
+
+  it("rejects an activity that carries no date at all", () => {
+    expect(() => mapActivities([activity({ type: "BUY", units: 1, price: 1, settlement_date: null, trade_date: null })])).toThrow(
+      /neither a settlement date nor a trade date/,
+    );
+  });
+
+  it("dates a skipped activity by its trade date when it has no settlement date", () => {
+    const { earliestDate } = mapActivities([
+      activity({ type: "BUY", units: 1, price: 1, settlement_date: "2026-03-02T15:00:00Z" }),
+      activity({ type: "INTEREST", symbol: null, settlement_date: null, trade_date: "2025-08-11T22:45:50Z" }),
+    ]);
+    expect(earliestDate).toBe("2025-08-11");
   });
 
   it("keeps the raw activity and never lets the trade date pass settlement", () => {

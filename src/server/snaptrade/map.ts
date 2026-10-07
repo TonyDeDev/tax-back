@@ -345,9 +345,14 @@ const LEDGER_TYPES = new Set([
   "STOCK_DIVIDEND",
   "FEE",
   "TAX",
+  "RETURN_OF_CAPITAL",
   "TRANSFER",
   "EXTERNAL_ASSET_TRANSFER_IN",
   "EXTERNAL_ASSET_TRANSFER_OUT",
+  // Shares moved between the user's own accounts at one broker: into a registered account that is a
+  // deemed disposition, so it cannot be skipped.
+  "INTERNAL_ASSET_TRANSFER_IN",
+  "INTERNAL_ASSET_TRANSFER_OUT",
 ]);
 
 interface Parsed {
@@ -359,10 +364,24 @@ interface Parsed {
 
 function parse(raw: Record<string, unknown>): Parsed {
   const result = activitySchema.safeParse(raw);
-  // A stored type with an unexpected shape fails the sync: silently dropping a trade would make the tax numbers wrong.
-  if (!result.success) throw new Error(`SnapTrade activity ${String(raw.id)} (${String(raw.type)}) has an unexpected shape`);
+  // A stored type with an unexpected shape fails the sync: silently dropping a trade would make the tax
+  // numbers wrong. The failing fields are named, because the next shape surprise is someone else's to read.
+  if (!result.success) {
+    const detail = result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ");
+    throw new Error(`SnapTrade activity ${String(raw.id)} (${String(raw.type)}) has an unexpected shape - ${detail}`);
+  }
   const activity = result.data;
-  const settlementDate = torontoDate(activity.settlement_date);
+  /*
+   * SnapTrade only sets `settlement_date` on trades; a dividend, fee, split, or transfer leaves it null,
+   * so the trade date stands in. For those events the two are the same day anyway. A BUY or SELL always
+   * carries its own settlement date, which is the one that decides the tax year, so this fallback never
+   * moves a disposition between years in practice.
+   */
+  const reported = activity.settlement_date ?? activity.trade_date;
+  if (!reported) {
+    throw new Error(`SnapTrade activity ${activity.id} (${activity.type}) has neither a settlement date nor a trade date`);
+  }
+  const settlementDate = torontoDate(reported);
   const tradeDate = activity.trade_date ? torontoDate(activity.trade_date) : settlementDate;
   // Some brokers report a trade date after settlement for corrections; the ledger needs trade <= settlement.
   return { activity, raw, tradeDate: tradeDate <= settlementDate ? tradeDate : settlementDate, settlementDate };
@@ -404,9 +423,12 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
     parsed.push(parse(raw));
   }
   for (const p of parsed) if (earliestDate === null || p.settlementDate < earliestDate) earliestDate = p.settlementDate;
+  // Skipped types still bound how far back the history reaches, and they are the ones with no settlement date.
   for (const raw of activities) {
-    if (LEDGER_TYPES.has(String(raw.type)) || typeof raw.settlement_date !== "string") continue;
-    const date = torontoDate(raw.settlement_date);
+    if (LEDGER_TYPES.has(String(raw.type))) continue;
+    const reported = [raw.settlement_date, raw.trade_date].find((d) => typeof d === "string");
+    if (reported === undefined) continue;
+    const date = torontoDate(reported);
     if (earliestDate === null || date < earliestDate) earliestDate = date;
   }
 
@@ -492,6 +514,16 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
         });
         break;
       }
+      case "RETURN_OF_CAPITAL": {
+        // Cash paid out of capital rather than earnings: not income, it lowers the ACB of the shares held.
+        const amount = dec(a.amount);
+        if (!security || !amount.gt(0)) {
+          skip(amount.isNegative() ? "RETURN_OF_CAPITAL_REVERSAL" : a.type);
+          break;
+        }
+        transactions.push({ ...base(p, security), kind: "roc", amount });
+        break;
+      }
       case "TAX": {
         const key = security ? taxKey(security.snaptradeSymbolId, p.settlementDate) : null;
         if (!key || !dividendKeys.has(key)) {
@@ -542,13 +574,16 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
       }
       case "TRANSFER":
       case "EXTERNAL_ASSET_TRANSFER_IN":
-      case "EXTERNAL_ASSET_TRANSFER_OUT": {
+      case "EXTERNAL_ASSET_TRANSFER_OUT":
+      case "INTERNAL_ASSET_TRANSFER_IN":
+      case "INTERNAL_ASSET_TRANSFER_OUT": {
         const signed = dec(a.units);
         if (!security || signed.isZero()) {
           skip(a.type);
           break;
         }
-        const out = a.type === "EXTERNAL_ASSET_TRANSFER_OUT" || (a.type === "TRANSFER" && signed.isNegative());
+        // The named types carry their direction; a plain TRANSFER only has the sign of its units.
+        const out = a.type.endsWith("_TRANSFER_OUT") || (a.type === "TRANSFER" && signed.isNegative());
         transactions.push({
           ...base(p, security),
           kind: out ? "transfer_out" : "transfer_in",

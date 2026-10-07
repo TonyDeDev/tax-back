@@ -8,12 +8,9 @@ export interface NavItem {
   icon: LucideIcon;
 }
 
-/** Tax year the Tax Center links open on until real data decides it. */
-export const DEFAULT_TAX_YEAR = 2026;
-
 export const NAV_ITEMS: NavItem[] = [
   { label: "Hub", href: "/hub", match: "/hub", icon: LayoutDashboard },
-  { label: "Tax Center", href: `/tax/${DEFAULT_TAX_YEAR}`, match: "/tax", icon: Receipt },
+  { label: "Tax Center", href: "/tax", match: "/tax", icon: Receipt },
   { label: "Settings", href: "/settings", match: "/settings", icon: Settings },
 ];
 
