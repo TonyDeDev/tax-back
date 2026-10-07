@@ -214,12 +214,17 @@ Recorded as rules for the sync phase in `docs/schema.md` ("Rules for Writers"): 
   Sandbox, which returns one of almost every type. Each is counted in `sync_runs.stats.skipped` but
   raises no warning, so the numbers look complete when they are not:
   - ~~`RETURN_OF_CAPITAL`~~ and ~~`INTERNAL_ASSET_TRANSFER_IN` / `_OUT`~~ were mapped on 2026-10-06.
-  - `REVERSE_SPLIT` is not mapped, so quantities after one are wrong.
-  - A `TAX` withholding row only attaches to a dividend on the same security *and* the same settlement
-    date. The sandbox puts them on different dates, so the withholding was dropped.
-  - `SPLIT` is skipped when no position is known, because the ratio comes from the unit delta and needs
-    the quantity before it. Correct, but silent; it should ask for an opening balance.
+  - ~~`REVERSE_SPLIT`~~ and ~~the `TAX` withholding date match~~ were fixed on 2026-10-07.
   - `SPINOFF` and `STOCK_MERGER` are skipped by design: the user enters those as corporate actions.
+- **A split whose position predates the activity window cannot be applied.** The ratio is derived from
+  the unit change, which needs the quantity before the split, and the mapper only sees activities from
+  the current sync. It is now counted as `SPLIT_NO_POSITION` / `REVERSE_SPLIT_NO_POSITION` rather than
+  as an ordinary skip, so the gap is visible in `sync_runs.stats.skipped`, but it is still dropped and
+  an opening balance added later does not bring it back.
+  The real fix is to resolve the ratio against the stored ledger instead of the activity window: either
+  store the unit change and let the engine derive the ratio while it replays (needs a migration and a
+  change to the `split` rule), or resolve it in the sync, which has the database. Until then a security
+  whose history starts after its split keeps the wrong quantity, so its ACB per share is wrong too.
 - Google OAuth client: still unconfigured, so "Continue with Google" is disabled. Not needed for
   SnapTrade sign-in or the demo.
 - A "Disconnect SnapTrade" action should revoke the refresh token at SnapTrade before unlinking (Better Auth's unlink alone does not revoke).

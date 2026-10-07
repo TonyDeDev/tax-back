@@ -238,7 +238,8 @@ describe("mapActivities", () => {
       activity({ type: "SPLIT", symbol: AAPL, units: 10, settlement_date: "2026-06-10T15:00:00Z" }),
     ]);
     expect(transactions.find((t) => t.kind === "split")!.splitRatio!.toString()).toBe("0.25");
-    expect(skipped).toEqual({ SPLIT: 1 });
+    // Nothing held, so the ratio cannot be derived; counted apart from a skip that has no tax meaning.
+    expect(skipped).toEqual({ SPLIT_NO_POSITION: 1 });
   });
 
   it("maps stock dividends with their value, and counts their units for a later split", () => {
@@ -251,6 +252,74 @@ describe("mapActivities", () => {
     expect([dividend.quantity.toString(), dividend.amount.toString(), dividend.dividendClass]).toEqual(["5", "52.5", "eligible"]);
     // 105 held after the stock dividend, 105 added: a 2-for-1.
     expect(transactions.find((t) => t.kind === "split")!.splitRatio!.toString()).toBe("2");
+  });
+
+  /*
+   * A reverse split is reported like a forward one, as a change in units, so the ratio simply lands
+   * below 1. The engine multiplies the pooled quantity by it and leaves ACB alone.
+   */
+  it("maps a reverse split to a ratio below 1", () => {
+    const { transactions, skipped } = mapActivities([
+      activity({ type: "BUY", units: 4, price: 100 }),
+      // "AAPL 1-for-2 reverse split": 4 units become 2, reported as a change of -2.
+      activity({ type: "REVERSE_SPLIT", units: -2, price: 0, settlement_date: null, trade_date: "2026-09-17T12:00:00Z" }),
+    ]);
+    const split = transactions.find((t) => t.kind === "split")!;
+    expect(split.splitRatio!.toString()).toBe("0.5");
+    expect(split.settlementDate).toBe("2026-09-17");
+    expect(skipped).toEqual({});
+  });
+
+  it("counts a split it cannot apply apart from one with no tax meaning", () => {
+    // No purchase in the window, so the quantity before the split is unknown and the ratio cannot be derived.
+    const { transactions, skipped } = mapActivities([activity({ type: "SPLIT", units: 16 })]);
+    expect(transactions).toEqual([]);
+    expect(skipped).toEqual({ SPLIT_NO_POSITION: 1 });
+    const reverse = mapActivities([activity({ type: "REVERSE_SPLIT", units: -2 })]);
+    expect(reverse.skipped).toEqual({ REVERSE_SPLIT_NO_POSITION: 1 });
+  });
+
+  it("never lets a reverse split take a position to zero or below", () => {
+    const { transactions, skipped } = mapActivities([
+      activity({ type: "BUY", units: 2, price: 100 }),
+      activity({ type: "REVERSE_SPLIT", units: -2 }),
+    ]);
+    expect(transactions.map((t) => t.kind)).toEqual(["buy"]);
+    expect(skipped).toEqual({ REVERSE_SPLIT: 1 });
+  });
+
+  /*
+   * Brokers post withholding a day or two off the dividend. The sandbox had the AAPL dividend settling
+   * 2026-09-26 and its tax row on 2026-09-25, which an exact-date match dropped.
+   */
+  it("attaches withholding to a dividend a day away", () => {
+    const { transactions } = mapActivities([
+      activity({ type: "DIVIDEND", amount: 12.5, cls: "foreign", settlement_date: "2026-09-26T13:00:00Z" }),
+      activity({ type: "TAX", amount: -1.88, settlement_date: "2026-09-25T13:00:00Z" }),
+    ]);
+    const dividend = transactions.find((t) => t.kind === "dividend")!;
+    expect(dividend.withholdingTax!.toString()).toBe("1.88");
+  });
+
+  it("attaches withholding to the nearest dividend when a security has several", () => {
+    const { transactions } = mapActivities([
+      activity({ type: "DIVIDEND", amount: 10, settlement_date: "2026-01-15T13:00:00Z" }),
+      activity({ type: "DIVIDEND", amount: 10, settlement_date: "2026-04-15T13:00:00Z" }),
+      activity({ type: "TAX", amount: -1.5, settlement_date: "2026-04-17T13:00:00Z" }),
+    ]);
+    const [january, april] = transactions.filter((t) => t.kind === "dividend");
+    expect(january!.withholdingTax).toBeNull();
+    expect(april!.withholdingTax!.toString()).toBe("1.5");
+  });
+
+  it("leaves withholding unmatched when no dividend is anywhere near it", () => {
+    const { transactions, skipped } = mapActivities([
+      activity({ type: "DIVIDEND", amount: 10, settlement_date: "2026-01-15T13:00:00Z" }),
+      // Two months later: too far to belong to that dividend, so it is not silently folded in.
+      activity({ type: "TAX", amount: -1.5, settlement_date: "2026-03-20T13:00:00Z" }),
+    ]);
+    expect(transactions.find((t) => t.kind === "dividend")!.withholdingTax).toBeNull();
+    expect(skipped).toEqual({ TAX: 1 });
   });
 
   it("maps fees and transfers", () => {

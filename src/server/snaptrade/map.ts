@@ -342,6 +342,7 @@ const LEDGER_TYPES = new Set([
   "DIVIDEND",
   "SUBSTITUTE_DIVIDEND",
   "SPLIT",
+  "REVERSE_SPLIT",
   "STOCK_DIVIDEND",
   "FEE",
   "TAX",
@@ -438,15 +439,38 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
       (x.activity.id < y.activity.id ? -1 : 1),
   );
 
-  // Withholding tax arrives as its own TAX activity; it belongs to the same-day dividend on the same security.
+  /*
+   * Withholding tax arrives as its own TAX activity. Brokers post it a day or two off the dividend it
+   * belongs to rather than on the same date, so it attaches to the nearest dividend on the same security
+   * within a window. The window stays well short of a monthly payer's 30-day spacing, so the nearest
+   * dividend is never ambiguous.
+   */
+  const WITHHOLDING_WINDOW_DAYS = 7;
   const withholding = new Map<string, Dec>();
   const taxKey = (symbolId: string, date: string) => `${symbolId}|${date}`;
-  const dividendKeys = new Set<string>();
+  const dividendDates = new Map<string, string[]>();
   for (const { activity: a, settlementDate } of parsed) {
     if ((a.type === "DIVIDEND" || a.type === "SUBSTITUTE_DIVIDEND") && a.symbol) {
-      dividendKeys.add(taxKey(a.symbol.id, settlementDate));
+      dividendDates.set(a.symbol.id, [...(dividendDates.get(a.symbol.id) ?? []), settlementDate]);
     }
   }
+  const daysApart = (a: string, b: string) =>
+    Math.abs(Date.UTC(+a.slice(0, 4), +a.slice(5, 7) - 1, +a.slice(8, 10)) - Date.UTC(+b.slice(0, 4), +b.slice(5, 7) - 1, +b.slice(8, 10))) /
+    86_400_000;
+
+  /** The dividend a withholding row belongs to: the nearest one on that security, earliest breaking a tie. */
+  const dividendDateFor = (symbolId: string, date: string): string | null => {
+    let best: string | null = null;
+    let bestGap = Infinity;
+    for (const candidate of [...(dividendDates.get(symbolId) ?? [])].sort()) {
+      const gap = daysApart(candidate, date);
+      if (gap <= WITHHOLDING_WINDOW_DAYS && gap < bestGap) {
+        best = candidate;
+        bestGap = gap;
+      }
+    }
+    return best;
+  };
 
   const held = new Map<string, Dec>();
   const hold = (id: string, delta: Dec) => held.set(id, (held.get(id) ?? new D(0)).plus(delta));
@@ -525,21 +549,40 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
         break;
       }
       case "TAX": {
-        const key = security ? taxKey(security.snaptradeSymbolId, p.settlementDate) : null;
-        if (!key || !dividendKeys.has(key)) {
+        const paidOn = security ? dividendDateFor(security.snaptradeSymbolId, p.settlementDate) : null;
+        if (!security || !paidOn) {
           skip("TAX");
           break;
         }
+        const key = taxKey(security.snaptradeSymbolId, paidOn);
         withholding.set(key, (withholding.get(key) ?? new D(0)).plus(dec(a.amount).abs()));
         break;
       }
-      case "SPLIT": {
+      // A reverse split is the same event with a negative unit change, so the ratio comes out below 1.
+      case "SPLIT":
+      case "REVERSE_SPLIT": {
         // SnapTrade reports the change in units; the engine needs new shares per old share.
         const before = security ? (held.get(security.snaptradeSymbolId) ?? new D(0)) : new D(0);
         const delta = dec(a.units);
         const after = before.plus(delta);
-        if (!security || !before.gt(0) || !after.gt(0) || delta.isZero()) {
-          skip("SPLIT");
+        if (!security || delta.isZero()) {
+          skip(a.type);
+          break;
+        }
+        /*
+         * The ratio needs the quantity before the split, and that only comes from activities in this
+         * sync. A security whose purchases predate the window has none, so the split cannot be applied
+         * and is counted separately: it is a gap in the numbers, not an event with no tax meaning.
+         * Checked before `after`, or a reverse split with nothing held would look like the case below.
+         * Recomputing it later would need the ratio resolved against the stored ledger instead.
+         */
+        if (!before.gt(0)) {
+          skip(`${a.type}_NO_POSITION`);
+          break;
+        }
+        // A change that would leave nothing held is not a split; applying it would zero the position.
+        if (!after.gt(0)) {
+          skip(a.type);
           break;
         }
         transactions.push({ ...base(p, security), kind: "split", splitRatio: after.dividedBy(before) });
