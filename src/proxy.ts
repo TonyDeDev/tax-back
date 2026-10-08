@@ -62,7 +62,7 @@ export const config = {
   matcher: [
     {
       // Pages only: API routes set their own headers, and static assets need none.
-      source: "/((?!api|_next/static|_next/image|favicon.ico).*)",
+      source: "/((?!api|_next/static|_next/image|favicon.ico|icon.svg|apple-icon.png|brand/).*)",
       missing: [
         { type: "header", key: "next-router-prefetch" },
         { type: "header", key: "purpose", value: "prefetch" },
