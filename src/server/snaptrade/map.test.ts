@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   friendlyAccountName,
   guessAccountType,
+  holdingsUnreported,
   accountKind,
   isSyncedAccount,
   mapAccount,
@@ -153,6 +154,40 @@ describe("accounts", () => {
     const mapped = mapAccount(account({ name: " ", meta: { currency: "bad" }, balance: null }));
     expect(mapped.name).toBe("TFSA");
     expect(mapped.baseCurrency).toBe("CAD");
+    expect(mapped.reportedTotal).toBeNull();
+    expect(mapped.reportedTotalCurrency).toBeNull();
+  });
+
+  it("keeps the broker's total only with both an amount and a currency", () => {
+    const mapped = mapAccount(account({ balance: { total: { amount: 2979.12862883, currency: "CAD" } } }));
+    expect(mapped.reportedTotal!.toString()).toBe("2979.12862883");
+    expect(mapped.reportedTotalCurrency).toBe("CAD");
+    expect(mapAccount(account({ balance: { total: { amount: 5, currency: null } } })).reportedTotal).toBeNull();
+    expect(mapAccount(account({ balance: { total: { amount: null, currency: "CAD" } } })).reportedTotalCurrency).toBeNull();
+  });
+});
+
+describe("holdingsUnreported", () => {
+  // A Wealthsimple managed TFSA as SnapTrade returns it: no positions, $8.20 cash, a $2,979.13 total.
+  const managed = mapAccount(account({ balance: { total: { amount: 2979.12862883, currency: "CAD" } } }));
+  const cash = (code: string, amount: number) => mapBalances([{ currency: { code }, cash: amount }]);
+
+  it("is true when there are no positions and the total is more than the cash", () => {
+    expect(holdingsUnreported(managed, 0, cash("CAD", 8.2))).toBe(true);
+    expect(holdingsUnreported(managed, 0, [])).toBe(true);
+  });
+
+  it("is false when positions are listed, or when the total is only the cash", () => {
+    expect(holdingsUnreported(managed, 3, cash("CAD", 8.2))).toBe(false);
+    expect(holdingsUnreported(managed, 0, cash("CAD", 2979.13))).toBe(false);
+    const empty = mapAccount(account({ balance: { total: { amount: 0, currency: "CAD" } } }));
+    expect(holdingsUnreported(empty, 0, [])).toBe(false);
+  });
+
+  it("is false without a total, or with cash in another currency that cannot be compared", () => {
+    expect(holdingsUnreported(mapAccount(account({})), 0, [])).toBe(false);
+    expect(holdingsUnreported(managed, 0, [...cash("CAD", 8.2), ...cash("USD", 100)])).toBe(false);
+    expect(holdingsUnreported(managed, 0, [...cash("CAD", 8.2), ...cash("USD", 0)])).toBe(true);
   });
 });
 

@@ -1,4 +1,5 @@
 import { eq } from "drizzle-orm";
+import { carryGapSince } from "@/server/reconciliation";
 import type { DerivedRows } from "./ledger";
 import * as s from "./schema";
 import type { AnyDb } from "./types";
@@ -15,9 +16,21 @@ function chunks<T>(rows: readonly T[]): T[][] {
 /**
  * Replaces every derived row for one user in a single transaction, so readers see either the old
  * results or the new ones, never a mix. Replacements cascade from `superficial_losses`.
+ * Reconciliation gaps keep the day they first appeared (`today` starts new ones).
  */
-export async function replaceDerived(db: AnyDb, userId: string, rows: DerivedRows): Promise<void> {
+export async function replaceDerived(db: AnyDb, userId: string, rows: DerivedRows, today: string): Promise<void> {
   await db.transaction(async (tx) => {
+    const previous = await tx
+      .select({
+        securityId: s.positionReconciliations.securityId,
+        accountId: s.positionReconciliations.accountId,
+        status: s.positionReconciliations.status,
+        gapSince: s.positionReconciliations.gapSince,
+      })
+      .from(s.positionReconciliations)
+      .where(eq(s.positionReconciliations.userId, userId));
+    const reconciliations = carryGapSince(rows.positionReconciliations, previous, today);
+
     for (const table of [
       s.acbEvents,
       s.acbPositions,
@@ -39,7 +52,7 @@ export async function replaceDerived(db: AnyDb, userId: string, rows: DerivedRow
     for (const part of chunks(rows.harvestOpportunities)) await tx.insert(s.harvestOpportunities).values(part);
     for (const part of chunks(rows.taxYearSummaries)) await tx.insert(s.taxYearSummaries).values(part);
     for (const part of chunks(rows.taxWarnings)) await tx.insert(s.taxWarnings).values(part);
-    for (const part of chunks(rows.positionReconciliations)) await tx.insert(s.positionReconciliations).values(part);
+    for (const part of chunks(reconciliations)) await tx.insert(s.positionReconciliations).values(part);
 
     for (const part of chunks(rows.superficialLosses)) {
       const inserted = await tx

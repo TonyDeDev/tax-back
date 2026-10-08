@@ -1,5 +1,5 @@
 import "server-only";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import * as s from "@/server/db/schema";
 import type { AnyDb } from "@/server/db/types";
 import { latestRates } from "@/server/fx/boc";
@@ -12,14 +12,17 @@ import { D, type Dec } from "@/tax-engine";
  */
 
 export interface Valuation {
-  /** Holdings plus cash per account, or null once any amount in it has no CAD rate (a partial sum would mislead). */
+  /**
+   * Holdings plus cash per account, or null once any amount in it has no CAD rate (a partial sum would mislead).
+   * An account whose holdings SnapTrade does not list is worth the broker's reported total instead.
+   */
   accounts: Map<string, Dec | null>;
   /** The broker's price per unit in CAD, per security held, where a price and rate exist. */
   pricesCad: Map<string, Dec>;
 }
 
 export async function valueHoldings(db: AnyDb, userId: string, today: string): Promise<Valuation> {
-  const [holdings, balances] = await Promise.all([
+  const [holdings, balances, unreported] = await Promise.all([
     db
       .select({
         accountId: s.holdings.accountId,
@@ -34,8 +37,22 @@ export async function valueHoldings(db: AnyDb, userId: string, today: string): P
       .select({ accountId: s.accountBalances.accountId, currency: s.accountBalances.currency, cash: s.accountBalances.cash })
       .from(s.accountBalances)
       .where(eq(s.accountBalances.userId, userId)),
+    db
+      .select({
+        accountId: s.brokerageAccounts.id,
+        total: s.brokerageAccounts.reportedTotal,
+        currency: s.brokerageAccounts.reportedTotalCurrency,
+      })
+      .from(s.brokerageAccounts)
+      .where(and(eq(s.brokerageAccounts.userId, userId), eq(s.brokerageAccounts.holdingsUnreported, true))),
   ]);
-  const currencies = [...new Set([...holdings.map((h) => h.currency), ...balances.map((b) => b.currency)])];
+  const currencies = [
+    ...new Set([
+      ...holdings.map((h) => h.currency),
+      ...balances.map((b) => b.currency),
+      ...unreported.flatMap((u) => (u.currency ? [u.currency] : [])),
+    ]),
+  ];
   const rates = await latestRates(db, currencies, today);
 
   const accounts = new Map<string, Dec | null>();
@@ -52,6 +69,11 @@ export async function valueHoldings(db: AnyDb, userId: string, today: string): P
     if (h.price !== null && rate !== undefined) pricesCad.set(h.securityId, new D(h.price).times(rate));
   }
   for (const b of balances) add(b.accountId, b.cash, b.currency);
+  // The reported total already includes the cash, so it replaces the sum rather than adding to it.
+  for (const u of unreported) {
+    const rate = u.currency ? rates.get(u.currency) : undefined;
+    accounts.set(u.accountId, u.total === null || rate === undefined ? null : new D(u.total).times(rate));
+  }
   return { accounts, pricesCad };
 }
 

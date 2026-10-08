@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
-import { Download, FileText, Lightbulb, Percent, TrendingDown, TriangleAlert } from "lucide-react";
+import { CircleCheck, Download, FileText, Info, Lightbulb, Percent, TrendingDown, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
 import { Money } from "@/components/money";
 import { PageHeader } from "@/components/page-header";
 import { StatCard } from "@/components/stat-card";
+import { CopyAmount } from "@/components/tax/copy-amount";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
-import { formatDate, formatPercent, formatQuantity } from "@/lib/format";
+import { formatDate, formatMoney, formatPercent, formatQuantity } from "@/lib/format";
 import { DIVIDEND_CLASS_LABELS, GAIN_KIND_LABELS } from "@/lib/tax-csv";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
@@ -66,6 +67,95 @@ function Summary({ view }: { view: TaxYearView }) {
         hint={t?.estimatedTaxCad ? "On capital gains only" : "Needs your marginal tax rate"}
       />
     </section>
+  );
+}
+
+const listFormat = new Intl.ListFormat("en-CA", { type: "conjunction" });
+
+/** What makes this year's numbers unreliable, worst first; an all-clear when there is nothing. */
+function Readiness({ view }: { view: TaxYearView }) {
+  const { checks, t3Symbols } = view.returnView;
+  return (
+    <div className="flex flex-col gap-2">
+      {checks.length === 0 ? (
+        <p className="flex items-center gap-2 text-body-sm">
+          <CircleCheck aria-hidden className="size-4 shrink-0 text-positive" />
+          Nothing to fix first: every position with an ACB matches your brokers, and your account types are confirmed.
+        </p>
+      ) : (
+        <>
+          <p className="flex items-center gap-2 text-body-sm font-medium">
+            <TriangleAlert aria-hidden className="size-4 shrink-0 text-negative" />
+            {checks.length === 1 ? "1 thing to check first" : `${checks.length} things to check first`}
+          </p>
+          <ul className="flex flex-col divide-y divide-border rounded-md border">
+            {checks.map((c) => (
+              <li key={c.key} className="flex flex-col gap-1 px-4 py-2 text-body-sm sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+                <span>{c.text}</span>
+                {c.href && (
+                  <Link href={c.href} className="shrink-0 text-link hover:underline">
+                    {c.linkLabel}
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <p className="flex items-start gap-2 text-caption text-muted-foreground">
+        <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+        <span>
+          {t3Symbols.length > 0 &&
+            `For ${listFormat.format(t3Symbols)}, use your T3 ${t3Symbols.length === 1 ? "slip" : "slips"} instead: a Canadian ETF's distribution mixes dividends, capital gains, and return of capital, and only the T3 has the split. `}
+          Compare the dividend lines with your T5 and T3 slips before you file.
+        </span>
+      </p>
+    </div>
+  );
+}
+
+/** The amounts to type into the return, one row per line, with the form and line number to find it by. */
+function FillOutReturn({ view }: { view: TaxYearView }) {
+  const r = view.returnView;
+  return (
+    <div className="flex flex-col gap-4">
+      <Readiness view={view} />
+      {!r.verified && (
+        <p className="text-caption text-muted-foreground">
+          Line numbers are from the {r.formYear} forms. CRA has not published the {view.year} forms yet, so check them when it does.
+        </p>
+      )}
+      <ul className="flex flex-col divide-y divide-border rounded-md border">
+        {r.lines.map((l) => (
+          <li key={l.key} className="flex items-start gap-3 px-4 py-3">
+            <span className="flex min-w-0 flex-1 flex-col gap-1">
+              <span className="flex flex-wrap items-center gap-2">
+                <Badge variant="outline" className="font-mono">
+                  {l.form}
+                  {l.line ? ` · ${l.line}` : ""}
+                </Badge>
+                <span className="text-body-sm font-medium">{l.label}</span>
+              </span>
+              {l.note && <span className="text-caption text-muted-foreground">{l.note}</span>}
+            </span>
+            <span className="flex shrink-0 items-center gap-1 pt-0.5">
+              <Money value={l.amountCad} signed={l.key.startsWith("s3-gain")} className="text-body-sm font-medium" />
+              <CopyAmount value={l.amountCad} label={l.line ? `line ${l.line}` : l.label} />
+            </span>
+          </li>
+        ))}
+      </ul>
+      {r.netCapitalLossCad && (
+        <p className="text-body-sm text-muted-foreground">
+          You have a net capital loss of {formatMoney(r.netCapitalLossCad)} for {view.year}. It does not go on line 12700: you can apply it against
+          taxable capital gains of the past 3 years (Form T1A) or carry it forward to future years (line 25300).
+        </p>
+      )}
+      <p className="text-caption text-muted-foreground">
+        Not covered: interest income, carrying charges (line 22100), losses from other years (line 25300), RRSP and FHSA deductions, foreign
+        property (Form T1135), and provincial forms.
+      </p>
+    </div>
   );
 }
 
@@ -512,6 +602,18 @@ export default async function TaxCenter(props: PageProps<"/tax/[year]">) {
       )}
 
       <Summary view={view} />
+
+      <Card id="return">
+        <CardHeader>
+          <CardTitle>Fill out your return</CardTitle>
+          <CardDescription>
+            What to enter for {year}, line by line, from your non-registered accounts. Copy each amount into your tax software.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FillOutReturn view={view} />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

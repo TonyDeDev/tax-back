@@ -99,11 +99,13 @@ describe("demo seed", () => {
     expect(harvest).toMatchObject({ blockedByRecentPurchase: false });
   });
 
-  it("matches the brokers everywhere but the RRSP's untracked VFV units", async () => {
-    const summary = await getReconciliation(db, DEMO_USER_ID);
-    // Pooled XEQT, RY, BCE, AAPL, MSFT, plus TFSA XEQT and SHOP, RRSP VFV, and Roth IRA AAPL.
-    expect(summary).toMatchObject({ matched: 8, total: 9 });
-    expect(summary.gaps).toEqual([expect.objectContaining({ symbol: "VFV", accountName: "RRSP", ledgerQuantity: "30.0000000000", brokerQuantity: "40.0000000000" })]);
+  it("matches the brokers everywhere but the RRSP's untracked VFV units, which do not affect tax", async () => {
+    const summary = await getReconciliation(db, DEMO_USER_ID, TODAY);
+    // Pooled XEQT, RY, BCE, AAPL, MSFT all match; the registered rows are checked but carry no ACB.
+    expect(summary).toMatchObject({ matched: 5, total: 5, gaps: [], waiting: [] });
+    expect(summary.registered).toEqual([
+      expect.objectContaining({ symbol: "VFV", accountName: "RRSP", ledgerQuantity: "30.0000000000", brokerQuantity: "40.0000000000" }),
+    ]);
   });
 
   it("closes the MSFT transfer with an opening balance, and lists one RY row on the Hub", async () => {

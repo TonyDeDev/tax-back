@@ -30,6 +30,7 @@ import { ensureDemoSeeded } from "@/server/demo/seed";
 import { getEnv } from "@/server/env";
 import {
   type HubBrokerage,
+  type HubPendingBrokerage,
   type HubSummary,
   type HubSync,
   type ReconciliationSummary,
@@ -98,7 +99,7 @@ function SyncProblem({ sync }: { sync: HubSync }) {
 
 /** Every item the "Needs attention" card lists; the Alerts count is its length. */
 function attentionItems(summary: HubSummary, reconciliation: ReconciliationSummary, hidden: boolean): AttentionItem[] {
-  const broken = summary.brokerages.filter((b) => b.status === "broken");
+  const broken = [...summary.brokerages, ...summary.pendingBrokerages].filter((b) => b.status === "broken");
   return [
     ...broken.map((b) => ({
       tone: "negative" as const,
@@ -116,16 +117,49 @@ function attentionItems(summary: HubSummary, reconciliation: ReconciliationSumma
           },
         ]
       : []),
+    // Only gaps that change ACB; registered-account gaps and ones still waiting for the broker are not alerts.
     ...reconciliation.gaps.map((g) => ({
       tone: "negative" as const,
-      text: `${g.symbol}: ledger ${formatQuantity(g.ledgerQuantity)}, broker ${formatQuantity(g.brokerQuantity)} units${
-        g.accountName ? ` (${g.accountName})` : ""
-      }`,
-      href: `/hub/securities/${g.securityId}#opening`,
+      text: `${g.symbol}: ledger ${formatQuantity(g.ledgerQuantity)}, broker ${formatQuantity(g.brokerQuantity)} units`,
+      href: `/hub/securities/${g.securityId}${g.status === "broker_has_more" ? "#opening" : "#reconciliation"}`,
       linkLabel: g.status === "broker_has_more" ? "Add opening balance" : "Review",
     })),
     ...summary.warnings.map((w) => warningAttention(w, hidden)),
   ];
+}
+
+/** The ledger check under the investments table; only non-registered positions count, since only they carry ACB. */
+function ReconciliationNote({ reconciliation, matchShare }: { reconciliation: ReconciliationSummary; matchShare: number | null }) {
+  const extras = [
+    reconciliation.waiting.length > 0 &&
+      `${reconciliation.waiting.length} waiting for the broker to report recent trades`,
+    reconciliation.registered.length > 0 &&
+      `${reconciliation.registered.length} ${reconciliation.registered.length === 1 ? "gap" : "gaps"} in registered accounts, no effect on tax`,
+  ].filter(Boolean);
+  return (
+    <p className="flex items-start gap-2 text-caption text-muted-foreground">
+      <StatusDot
+        tone={reconciliation.gaps.length > 0 ? "negative" : matchShare === null ? "neutral" : "positive"}
+        className="mt-1"
+      />
+      <span>
+        {matchShare === null ? (
+          "No non-registered positions to check"
+        ) : (
+          <>
+            Ledger matches broker positions:{" "}
+            <strong className="font-mono font-medium tabular-nums text-foreground">{formatPercent(matchShare, matchShare === 1 ? 0 : 1)}</strong>{" "}
+            <span className="tabular-nums">
+              ({reconciliation.matched} of {reconciliation.total} non-registered)
+            </span>
+          </>
+        )}
+        {extras.map((text) => (
+          <span key={text as string}> · {text}</span>
+        ))}
+      </span>
+    </p>
+  );
 }
 
 function ConnectCta({ isDemo }: { isDemo: boolean }) {
@@ -194,6 +228,37 @@ function BrokerageSection({ brokerage: b, totalCad, readOnly }: { brokerage: Hub
   );
 }
 
+/** A connection SnapTrade lists no accounts for yet: shown so the brokerage is never silently missing. */
+function PendingBrokerageSection({ brokerage: b }: { brokerage: HubPendingBrokerage }) {
+  const broken = b.status === "broken";
+  return (
+    <section aria-label={b.name} className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-1">
+        <div className="flex min-w-0 items-center gap-3">
+          <h3 className="truncate font-sans text-body font-medium">{b.name}</h3>
+          <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
+            <StatusDot tone={broken ? "negative" : "neutral"} pulse={!broken} />
+            {broken ? "Needs reconnect" : "Waiting for accounts"}
+          </span>
+        </div>
+        <a
+          href={SNAPTRADE_DASHBOARD_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={buttonVariants({ variant: "outline", size: "sm" })}
+        >
+          {broken ? "Reconnect" : "Open SnapTrade"}
+          <ExternalLink aria-hidden className="size-4" />
+          <span className="sr-only">(opens SnapTrade in a new tab)</span>
+        </a>
+      </div>
+      {b.statusDetail && (
+        <p className="rounded-md border border-dashed px-4 py-3 text-body-sm text-muted-foreground">{b.statusDetail}</p>
+      )}
+    </section>
+  );
+}
+
 function NotConnected() {
   return (
     <Card className="mx-auto flex w-full max-w-lg flex-col items-center gap-4 px-6 py-12 text-center">
@@ -242,11 +307,13 @@ export default async function Hub(props: PageProps<"/hub">) {
   }
   const hasData = demoReady || lastSync !== null;
   const [summary, lastSuccessAt, reconciliation] = hasData
-    ? await Promise.all([getHubSummary(db, user.id, today), getLastSuccessfulSyncAt(db, user.id), getReconciliation(db, user.id)])
+    ? await Promise.all([getHubSummary(db, user.id, today), getLastSuccessfulSyncAt(db, user.id), getReconciliation(db, user.id, today)])
     : [null, null, null];
 
   const selected = summary?.brokerages.find((b) => b.id === first(params.brokerage)) ?? null;
   const shown = selected ? [selected] : (summary?.brokerages ?? []);
+  // Connections with no accounts yet have nothing to filter to, so they show only on the unfiltered Hub.
+  const pending = selected ? [] : (summary?.pendingBrokerages ?? []);
   const accountIds = selected ? selected.accounts.map((a) => a.id) : undefined;
   const [history, investments, byAccount] = summary
     ? await Promise.all([
@@ -412,14 +479,21 @@ export default async function Hub(props: PageProps<"/hub">) {
           <CardDescription>Confirm each account&apos;s type: it decides what is taxable.</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
-          {shown.length === 0 ? (
+          {shown.length === 0 && pending.length === 0 ? (
             <EmptyState
               icon={Briefcase}
               title="No investment accounts found"
               description="SnapTrade did not share any investment accounts. Add a brokerage in your SnapTrade account, then refresh."
             />
           ) : (
-            shown.map((b) => <BrokerageSection key={b.id} brokerage={b} totalCad={totalCad} readOnly={user.isDemo} />)
+            <>
+              {shown.map((b) => (
+                <BrokerageSection key={b.id} brokerage={b} totalCad={totalCad} readOnly={user.isDemo} />
+              ))}
+              {pending.map((b) => (
+                <PendingBrokerageSection key={b.id} brokerage={b} />
+              ))}
+            </>
           )}
         </CardContent>
       </Card>
@@ -438,19 +512,8 @@ export default async function Hub(props: PageProps<"/hub">) {
             pooled={pooled}
             byAccount={perAccount}
             aside={
-              matchShare === null ? null : (
-                <p className="flex items-center gap-2 text-caption text-muted-foreground">
-                  <StatusDot tone={reconciliation.gaps.length === 0 ? "positive" : "negative"} />
-                  <span>
-                    Ledger matches broker positions:{" "}
-                    <strong className="font-mono font-medium tabular-nums text-foreground">
-                      {formatPercent(matchShare, matchShare === 1 ? 0 : 1)}
-                    </strong>{" "}
-                    <span className="tabular-nums">
-                      ({reconciliation.matched} of {reconciliation.total})
-                    </span>
-                  </span>
-                </p>
+              matchShare === null && reconciliation.registered.length === 0 ? null : (
+                <ReconciliationNote reconciliation={reconciliation} matchShare={matchShare} />
               )
             }
           />

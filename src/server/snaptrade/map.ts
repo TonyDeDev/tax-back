@@ -90,6 +90,9 @@ export interface MappedAccount {
   brokerRawType: string | null;
   kind: AccountKind;
   accountTypeGuess: AccountType;
+  /** The broker's total for the account (holdings and cash), in `reportedTotalCurrency`. */
+  reportedTotal: Dec | null;
+  reportedTotalCurrency: string | null;
 }
 
 /** Acronyms that stay upper case in account names. */
@@ -141,6 +144,8 @@ export function friendlyAccountName(
 export function mapAccount(account: SnapTradeAccount): MappedAccount {
   const digits = (account.number ?? "").replace(/\W/g, "");
   const currency = [account.meta?.currency, account.balance?.total?.currency].find(isCurrency) ?? "CAD";
+  const total = account.balance?.total;
+  const reported = total && isCurrency(total.currency) && total.amount !== null && total.amount !== undefined;
   return {
     snaptradeAccountId: account.id,
     snaptradeAuthorizationId: account.brokerage_authorization,
@@ -151,7 +156,33 @@ export function mapAccount(account: SnapTradeAccount): MappedAccount {
     brokerRawType: account.raw_type ?? account.meta?.type ?? null,
     kind: accountKind(account),
     accountTypeGuess: guessAccountType(account),
+    reportedTotal: reported ? dec(total.amount) : null,
+    reportedTotalCurrency: reported ? total.currency! : null,
   };
+}
+
+/** Below this, a broker total and the cash it lists are the same amount, give or take rounding. */
+const UNREPORTED_TOLERANCE = new D("0.01");
+
+/**
+ * True when SnapTrade lists no positions for an account whose broker total is more than its cash:
+ * the account holds securities SnapTrade does not itemize (Wealthsimple managed portfolios do this).
+ * Such an account is valued at the broker total, since its holdings cannot be priced one by one.
+ * Cash in another currency than the total cannot be compared, so the answer is then no.
+ */
+export function holdingsUnreported(
+  account: Pick<MappedAccount, "reportedTotal" | "reportedTotalCurrency">,
+  positionCount: number,
+  balances: readonly MappedBalance[],
+): boolean {
+  const { reportedTotal, reportedTotalCurrency } = account;
+  if (positionCount > 0 || reportedTotal === null || reportedTotalCurrency === null) return false;
+  let cash = new D(0);
+  for (const b of balances) {
+    if (b.currency === reportedTotalCurrency) cash = cash.plus(b.cash);
+    else if (!b.cash.isZero()) return false;
+  }
+  return reportedTotal.minus(cash).gt(UNREPORTED_TOLERANCE);
 }
 
 // ===== Securities =====

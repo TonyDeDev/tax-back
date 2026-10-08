@@ -59,7 +59,11 @@ const act = (id: string, over: Record<string, unknown>) => ({
 });
 
 const snaptrade = {
-  authorizations: [{ id: "auth-ws", disabled: false, brokerage: { name: "Wealthsimple", display_name: "Wealthsimple", slug: "WEALTHSIMPLETRADE" } }],
+  authorizations: [
+    { id: "auth-ws", disabled: false, brokerage: { name: "Wealthsimple", display_name: "Wealthsimple", slug: "WEALTHSIMPLETRADE" } },
+    // A new Interactive Brokers Flex connection: SnapTrade lists it before it lists any of its accounts.
+    { id: "auth-ibkr", disabled: false, brokerage: { name: "Interactive Brokers", display_name: "Interactive Brokers", slug: "INTERACTIVE-BROKERS-FLEX" } },
+  ],
   accounts: [
     {
       id: "acc-nr",
@@ -80,6 +84,19 @@ const snaptrade = {
       raw_type: "TFSA",
       account_category: "INVESTMENT",
       meta: { type: "tfsa", currency: "CAD" },
+    },
+    {
+      // A Wealthsimple managed portfolio: SnapTrade lists no positions, only the broker's total.
+      id: "acc-managed",
+      brokerage_authorization: "auth-ws",
+      name: "Wealthsimple Trade TFSA",
+      number: "HQ0005MGD1",
+      institution_name: "Wealthsimple Trade",
+      raw_type: "TFSA",
+      status: "open",
+      account_category: "INVESTMENT",
+      meta: { type: "tfsa", currency: "CAD", unifiedAccountType: "MANAGED_PORTFOLIO_TFSA" },
+      balance: { total: { amount: 2979.12862883, currency: "CAD" } },
     },
     {
       // Closed and empty: skipped.
@@ -141,6 +158,7 @@ const snaptrade = {
     "acc-nr": [{ currency: { code: "CAD" }, cash: 100.5 }],
     "acc-tfsa": [],
     "acc-cash": [{ currency: { code: "CAD" }, cash: 3501.09 }],
+    "acc-managed": [{ currency: { code: "CAD" }, cash: 8.2 }],
   } as Record<string, unknown[]>,
 };
 
@@ -243,18 +261,23 @@ describe("syncUser", () => {
         ["acc-nr", "Personal", "investment", "non_registered", "NRAB", null],
         ["acc-tfsa", "TFSA", "investment", "tfsa", "TFSA", null],
         ["acc-cash", "Cash", "cash", "non_registered", "CASH", null],
+        ["acc-managed", "TFSA managed", "investment", "tfsa", "MGD1", null],
       ]),
     );
     // The credit card and the empty closed account are not stored.
-    expect(accounts).toHaveLength(3);
+    expect(accounts).toHaveLength(4);
+    // Only the managed account is valued at the broker's total; the others list their positions.
+    expect(accounts.filter((a) => a.holdingsUnreported).map((a) => [a.snaptradeAccountId, a.reportedTotal, a.reportedTotalCurrency])).toEqual([
+      ["acc-managed", "2979.128629", "CAD"],
+    ]);
     expect(accounts.find((a) => a.snaptradeAccountId === "acc-nr")!.historyCompleteFrom).toBe("2026-01-05");
 
-    expect(await rows(s.connections, A)).toBe(1);
+    expect(await rows(s.connections, A)).toBe(2);
     expect(await rows(s.transactions, A)).toBe(5);
     expect(await rows(s.holdings, A)).toBe(3);
 
     const cash = await db.select().from(s.accountBalances).where(eq(s.accountBalances.userId, A));
-    expect(cash.map((c) => c.cash).sort()).toEqual(["100.500000", "3501.090000"]);
+    expect(cash.map((c) => c.cash).sort()).toEqual(["100.500000", "3501.090000", "8.200000"]);
 
     // The non-registered sale at a loss, with the TFSA rebuy inside 30 days: denied and lost for good.
     const [gain] = await db.select().from(s.realizedGains).where(eq(s.realizedGains.userId, A));
@@ -275,15 +298,23 @@ describe("syncUser", () => {
 
     const [run] = await db.select().from(s.syncRuns).where(eq(s.syncRuns.userId, A));
     expect(run).toMatchObject({ status: "succeeded", trigger: "connect" });
-    expect(run!.stats).toMatchObject({ accounts: 3, transactions: 5, holdings: 3, skipped: { CONTRIBUTION: 1 } });
+    expect(run!.stats).toMatchObject({ accounts: 4, transactions: 5, holdings: 3, skipped: { CONTRIBUTION: 1, "position:unreported": 1 } });
     const [profile] = await db.select().from(s.userProfiles).where(eq(s.userProfiles.userId, A));
     expect(profile!.lastSyncedAt).not.toBeNull();
     expect(profile!.lastRecomputedAt).not.toBeNull();
 
     // Today's value snapshot is exactly the Hub total, so the chart ends on the number above it.
-    expect(await rows(s.accountValueSnapshots, A)).toBe(3);
+    expect(await rows(s.accountValueSnapshots, A)).toBe(4);
     const history = await getValueHistory(db, A);
     const summary = await getHubSummary(db, A, "2026-10-06");
+    // The managed account is worth the broker's total, which already includes its cash.
+    const managed = summary.brokerages.flatMap((b) => b.accounts).find((a) => a.name === "TFSA managed");
+    expect(managed).toMatchObject({ holdingsUnreported: true, valueCad: "2979.128629" });
+    // The connection with no accounts yet is listed as waiting, outside the brokerages and their totals.
+    expect(summary.brokerages.map((b) => b.name)).toEqual(["Wealthsimple"]);
+    expect(summary.pendingBrokerages).toEqual([
+      expect.objectContaining({ name: "Interactive Brokers", status: "active", statusDetail: expect.stringContaining("not listed any accounts") }),
+    ]);
     expect(history).toEqual([{ day: "2026-10-06", valueCad: summary.totalValueCad }]);
     expect(await rows(s.securityPriceSnapshots, A)).toBeGreaterThan(0);
   });
@@ -303,9 +334,9 @@ describe("syncUser", () => {
     const after = await db.select({ id: s.transactions.id }).from(s.transactions).where(eq(s.transactions.userId, A));
     expect(after.map((r) => r.id).sort()).toEqual(before.map((r) => r.id).sort());
     expect(await rows(s.holdings, A)).toBe(3);
-    expect(await rows(s.brokerageAccounts, A)).toBe(3);
+    expect(await rows(s.brokerageAccounts, A)).toBe(4);
     // A second sync on the same day replaces that day's snapshot rather than adding one.
-    expect(await rows(s.accountValueSnapshots, A)).toBe(3);
+    expect(await rows(s.accountValueSnapshots, A)).toBe(4);
     expect(bocCalls).toBe(0);
   });
 
@@ -403,6 +434,18 @@ describe("syncUser", () => {
     expect(gain).toBeDefined();
   });
 
+  it("removes a connection SnapTrade stopped listing once it has no accounts", async () => {
+    const saved = snaptrade.authorizations;
+    snaptrade.authorizations = saved.filter((a) => a.id !== "auth-ibkr");
+    try {
+      await syncUser(db, fakeAuth().auth, A, "cron", later(SYNC_COOLDOWN_MS * 11 + 1000));
+    } finally {
+      snaptrade.authorizations = saved;
+    }
+    const connections = await db.select().from(s.connections).where(eq(s.connections.userId, A));
+    expect(connections.map((c) => c.snaptradeAuthorizationId)).toEqual(["auth-ws"]);
+  });
+
   it("removes an account SnapTrade stopped listing only when it has no history", async () => {
     const [connection] = await db.select().from(s.connections).where(eq(s.connections.userId, A));
     await db.insert(s.brokerageAccounts).values({
@@ -414,17 +457,18 @@ describe("syncUser", () => {
     });
     await syncUser(db, fakeAuth().auth, A, "cron", later(SYNC_COOLDOWN_MS * 12));
     const ids = (await db.select().from(s.brokerageAccounts).where(eq(s.brokerageAccounts.userId, A))).map((a) => a.snaptradeAccountId);
-    expect(ids.sort()).toEqual(["acc-cash", "acc-nr", "acc-tfsa"]);
+    expect(ids.sort()).toEqual(["acc-cash", "acc-managed", "acc-nr", "acc-tfsa"]);
   });
 
   it("flags a brokerage that is no longer shared, but keeps its history", async () => {
-    const original = snaptrade.accounts;
+    const original = { accounts: snaptrade.accounts, authorizations: snaptrade.authorizations };
     snaptrade.accounts = [];
+    snaptrade.authorizations = [];
     try {
       const outcome = await syncUser(db, fakeAuth().auth, A, "cron", later(SYNC_COOLDOWN_MS * 13));
       expect(outcome.status).toBe("succeeded");
     } finally {
-      snaptrade.accounts = original;
+      Object.assign(snaptrade, original);
     }
     const [connection] = await db.select().from(s.connections).where(eq(s.connections.userId, A));
     expect(connection).toMatchObject({ status: "broken", statusDetail: "No longer shared through SnapTrade." });

@@ -32,6 +32,14 @@ export function AccountRow({ account: a, share, readOnly }: AccountRowProps) {
             {a.numberMasked}
           </span>
         )}
+        {a.holdingsUnreported && (
+          <span
+            className="text-caption text-muted-foreground"
+            title="SnapTrade does not list the holdings of this account (managed portfolios), so its value is the total the broker reports."
+          >
+            Broker total - holdings not itemized
+          </span>
+        )}
       </div>
 
       <span className={cn("text-right text-body-sm md:order-last", empty && "text-muted-foreground")}>

@@ -37,6 +37,19 @@ describe("dividends", () => {
     expect(r.years[0]!.foreignWithholdingCad.toFixed(2)).toBe("150.00");
   });
 
+  it("totals the taxable (grossed-up) amounts per class for lines 12000 and 12010", () => {
+    const eligible = run("eligible").years[0]!;
+    expect(eligible.eligibleDividendsCad.toFixed(2)).toBe("1000.00");
+    expect(eligible.eligibleTaxableCad.toFixed(2)).toBe("1380.00");
+    expect(eligible.nonEligibleTaxableCad.toFixed(2)).toBe("0.00");
+    const other = run("non_eligible").years[0]!;
+    expect(other.nonEligibleTaxableCad.toFixed(2)).toBe("1150.00");
+    expect(other.eligibleTaxableCad.toFixed(2)).toBe("0.00");
+    // Foreign income is never grossed up, so it adds to neither.
+    const foreign = run("foreign").years[0]!;
+    expect(foreign.eligibleTaxableCad.plus(foreign.nonEligibleTaxableCad).toFixed(2)).toBe("0.00");
+  });
+
   it("ignores dividends in registered accounts", () => {
     const r = computeTax({
       ledger: [entry({ kind: "dividend", date: "2025-03-01", amount: 1000, cls: "eligible", type: "tfsa" })],

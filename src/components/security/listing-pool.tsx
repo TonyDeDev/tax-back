@@ -41,7 +41,7 @@ type Result = { ok: true } | { ok: false; message: string };
 export function ListingPool({ poolId, symbol, listings, others, dividendOverride, automaticDividendClass, readOnly }: ListingPoolProps) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
-  const [linkTarget, setLinkTarget] = useState(others[0]?.id ?? "");
+  const [linkTarget, setLinkTarget] = useState("");
   const [dividend, setDividend] = useState<string>(dividendOverride ?? "automatic");
 
   const run = (action: () => Promise<Result>) =>
@@ -85,6 +85,9 @@ export function ListingPool({ poolId, symbol, listings, others, dividendOverride
             <div className="flex items-end gap-2">
               <Field label={`Same shares as ${symbol}`} hint="For an interlisted stock SnapTrade did not match">
                 <SelectInput value={linkTarget} onChange={(e) => setLinkTarget(e.target.value)}>
+                  <option value="" disabled>
+                    Choose a security
+                  </option>
                   {others.map((o) => (
                     <option key={o.id} value={o.id}>
                       {o.symbol}

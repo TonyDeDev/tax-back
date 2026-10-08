@@ -274,7 +274,7 @@ describe("ledger round trip", () => {
       fx: fxLookupFrom(fx),
       asOfDate: "2025-12-31",
     });
-    await replaceDerived(db, A, toDerivedRows(A, result, new Map(adjustments.map((a) => [a.securityId, a.id])), "2025-12-31"));
+    await replaceDerived(db, A, toDerivedRows(A, result, new Map(adjustments.map((a) => [a.securityId, a.id])), "2025-12-31"), "2025-12-31");
     return result;
   }
 

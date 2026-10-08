@@ -68,7 +68,18 @@ They apply to the security as a whole: the pool and every registered account hol
 - After replaying the ledger, the units it arrives at are compared with what each broker holds today:
   the pooled non-registered position per security, and each registered account on its own.
 - A gap is either units with no history (an opening balance closes it) or units unaccounted for.
-- The Hub shows "Ledger matches broker positions" as the share of positions that agree.
+- Only gaps in the pooled non-registered position can change tax, since only it carries ACB.
+  Each gap falls in one class (`src/server/reconciliation.ts`):
+  - **Tax gap:** non-registered, and either present since the account's first reconciliation (history the broker never shared) or older than 3 days.
+    The Hub lists it under "Needs attention" and the security page asks for an opening balance.
+  - **Waiting:** non-registered, and it appeared on a later sync less than 3 days ago.
+    Brokers count a new trade in their holdings a day or so before reporting it as an activity (a recurring buy is the usual case), so the user is not asked yet.
+  - **Registered:** inside a TFSA, RRSP, or other registered account.
+    There is no ACB, so it has no effect on tax and asks for nothing; it can only hide a purchase from a superficial loss check.
+- `position_reconciliations.gap_since` records the day a gap appeared.
+  The recompute carries it across while the gap keeps its direction, starts it today when a matching position drifts or a new position appears in an account already reconciled, and leaves it null on an account's first reconciliation.
+- The Hub shows "Ledger matches broker positions" as the share of non-registered positions that agree, and notes waiting and registered gaps separately.
+- A security held only in registered accounts (no ACB events, gains, opening balance, or corporate action) shows no ACB figures or opening balance form.
 
 ## Sale Preview
 
@@ -102,6 +113,29 @@ They apply to the security as a whole: the pool and every registered account hol
 - Eligible dividends use a 38% gross-up and a 15.0198% federal credit.
 - Non-eligible dividends use a 15% gross-up and a 9.0301% federal credit.
 - Foreign income has no gross-up or credit, and withholding tax is kept for a foreign tax credit.
+- The year summary keeps the grossed-up totals per class, for T1 lines 12000 and 12010.
+
+## Lines on the Return
+
+The Tax Center's "Fill out your return" maps the saved year results to form lines (`src/tax-engine/return-lines.ts`).
+Line numbers were checked against CRA's published forms (5006-R and 5000-S3) for 2019 to 2025 (`src/tax-engine/config/return-lines.ts`).
+
+| Form and line | Amount |
+| --- | --- |
+| Schedule 3, 13199 | Proceeds of every disposition in the year |
+| Schedule 3, 13200 | Their total gain or loss, with superficial losses left out |
+| T1 12700 | Taxable capital gains; zero for a net loss, which is shown as a loss to carry instead |
+| T1 12000 | Taxable amount of eligible and non-eligible dividends (grossed up) |
+| T1 12010 | The non-eligible part of line 12000 |
+| T1 12100 | Foreign dividends in CAD, before withholding |
+| Schedule 1, 40425 | Federal dividend tax credit |
+| Form T2209 | Foreign tax withheld, for the credit on line 40500 |
+
+- 2024's Schedule 3 splits dispositions by settlement date: Period 1 (January 1 to June 24) on lines 10689 and 10690, Period 2 (June 25 to December 31) on 13199 and 13200.
+- A year CRA has not published forms for yet uses the latest verified year's numbers and says so.
+- Readiness checks listed above the lines: tax gaps, sales larger than the known position, unconfirmed account types, superficial loss windows still open, and unverified rates.
+- Canadian ETFs that paid distributions into non-registered accounts are named with a pointer to their T3 slips, which hold the real split.
+- Not covered: interest income, line 22100 carrying charges, line 25300 losses of other years, capital gains from T3 and T5 slips (lines 17400 and 17600), RRSP and FHSA deductions, Form T1135, and provincial forms.
 
 ## From SnapTrade to the Ledger
 

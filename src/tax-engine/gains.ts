@@ -19,10 +19,10 @@ export function summarizeYears(
       const yearIncome = income.filter((i) => i.year === year);
       const sum = <T>(items: readonly T[], pick: (item: T) => Dec): Dec =>
         items.reduce((total, item) => total.plus(pick(item)), ZERO);
-      const sumClass = (cls: IncomeEvent["dividendClass"]): Dec =>
+      const sumClass = (cls: IncomeEvent["dividendClass"], pick: (i: IncomeEvent) => Dec = (i) => i.amountCad): Dec =>
         sum(
           yearIncome.filter((i) => i.dividendClass === cls),
-          (i) => i.amountCad,
+          pick,
         );
       const net = sum(yearGains, (g) => g.allowedGainCad);
       const taxable = net.times(config.inclusionRate);
@@ -37,6 +37,8 @@ export function summarizeYears(
         taxableCapitalGainCad: taxable,
         eligibleDividendsCad: sumClass("eligible"),
         nonEligibleDividendsCad: sumClass("non_eligible"),
+        eligibleTaxableCad: sumClass("eligible", (i) => i.grossedUpCad),
+        nonEligibleTaxableCad: sumClass("non_eligible", (i) => i.grossedUpCad),
         foreignIncomeCad: sumClass("foreign"),
         foreignWithholdingCad: sum(yearIncome, (i) => i.withholdingCad),
         federalDividendCreditCad: sum(yearIncome, (i) => i.federalCreditCad),

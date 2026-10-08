@@ -50,6 +50,20 @@
       "when": 1791329220193,
       "tag": "0006_value_snapshots",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1791427106148,
+      "tag": "0007_return_lines_gap_since",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1791428028668,
+      "tag": "0008_reported_account_total",
+      "breakpoints": true
     }
   ]
 }

@@ -13,6 +13,7 @@ import {
   type MappedBalance,
   type MappedHolding,
   type MappedSecurity,
+  holdingsUnreported,
   isSyncedAccount,
   mapAccount,
   mapActivities,
@@ -54,6 +55,7 @@ interface FetchedAccount {
   activities: MappedActivities;
   positionSecurities: MappedSecurity[];
   skippedPositions: Record<string, number>;
+  holdingsUnreported: boolean;
 }
 
 interface Fetched {
@@ -98,12 +100,17 @@ async function fetchAll(db: AnyDb, auth: Auth, userId: string): Promise<Fetched>
       const empty = activities.length === 0 && positions.length === 0 && !balances.some((b) => b.cash);
       if (raw.status === "closed" && empty) continue;
       const mappedPositions = mapPositions(positions);
+      const account = mapAccount(raw);
+      const mappedBalances = mapBalances(balances);
+      const unreported = holdingsUnreported(account, positions.length, mappedBalances);
       accounts.push({
-        account: mapAccount(raw),
+        account,
         holdings: mappedPositions.holdings,
         positionSecurities: mappedPositions.securities,
-        skippedPositions: mappedPositions.skipped,
-        balances: mapBalances(balances),
+        // Counted so the sync run shows it; the account is valued at the broker's total instead.
+        skippedPositions: unreported ? { ...mappedPositions.skipped, "position:unreported": 1 } : mappedPositions.skipped,
+        holdingsUnreported: unreported,
+        balances: mappedBalances,
         activities: mapActivities(activities),
       });
     }
@@ -164,9 +171,14 @@ async function upsertSecurities(tx: AnyDb, list: readonly MappedSecurity[]): Pro
 }
 
 async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) {
-  // Connections: one per SnapTrade brokerage authorization behind a synced account.
+  /*
+   * Connections: one per SnapTrade brokerage authorization, including those with no accounts listed yet.
+   * A new connection can take SnapTrade a day or more to fill (Interactive Brokers Flex reports arrive
+   * daily), and the Hub shows it as waiting rather than leaving the brokerage out.
+   */
   const authById = new Map(fetched.authorizations.map((a) => [a.id, a]));
-  const authorizationIds = [...new Set(fetched.accounts.map((a) => a.account.snaptradeAuthorizationId))];
+  const withAccounts = new Set(fetched.accounts.map((a) => a.account.snaptradeAuthorizationId));
+  const authorizationIds = [...new Set([...fetched.authorizations.map((a) => a.id), ...withAccounts])];
   const connectionIds = new Map<string, string>();
   for (const authorizationId of authorizationIds) {
     const auth = authById.get(authorizationId);
@@ -177,7 +189,11 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
       brokerageSlug: auth?.brokerage.slug ?? name.toUpperCase().replace(/\W+/g, ""),
       brokerageName: name,
       status: auth?.disabled ? ("broken" as const) : ("active" as const),
-      statusDetail: auth?.disabled ? "Reconnect this brokerage in the SnapTrade Dashboard." : null,
+      statusDetail: auth?.disabled
+        ? "Reconnect this brokerage in the SnapTrade Dashboard."
+        : withAccounts.has(authorizationId)
+          ? null
+          : "SnapTrade has not listed any accounts for this connection yet. A new connection can take up to 72 hours; if it stays empty, check it in the SnapTrade Dashboard.",
     };
     const [row] = await tx
       .insert(s.connections)
@@ -231,6 +247,9 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
         kind: a.kind,
         accountType: a.accountTypeGuess,
         historyCompleteFrom: f.activities.earliestDate,
+        reportedTotal: a.reportedTotal ? moneyText(a.reportedTotal) : null,
+        reportedTotalCurrency: a.reportedTotalCurrency,
+        holdingsUnreported: f.holdingsUnreported,
       })
       .onConflictDoUpdate({
         target: [s.brokerageAccounts.userId, s.brokerageAccounts.snaptradeAccountId],
@@ -244,6 +263,9 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
           // The user's confirmed type always wins over the broker's guess.
           accountType: sql`CASE WHEN ${s.brokerageAccounts.accountTypeConfirmedAt} IS NULL THEN excluded.account_type ELSE ${s.brokerageAccounts.accountType} END`,
           historyCompleteFrom: excluded("history_complete_from"),
+          reportedTotal: excluded("reported_total"),
+          reportedTotalCurrency: excluded("reported_total_currency"),
+          holdingsUnreported: excluded("holdings_unreported"),
           updatedAt: now,
         },
       })
@@ -326,7 +348,7 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
   }
 
   // Accounts SnapTrade no longer lists are kept while they hold history (closed accounts still carry ACB);
-  // empty ones are removed, with their holdings and balances.
+  // empty ones are removed, with their holdings and balances. A removed connection left with no accounts goes too.
   const kept = fetched.accounts.map((f) => f.account.snaptradeAccountId);
   await tx
     .delete(s.brokerageAccounts)
@@ -335,6 +357,15 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
         eq(s.brokerageAccounts.userId, userId),
         kept.length > 0 ? notInArray(s.brokerageAccounts.snaptradeAccountId, kept) : undefined,
         sql`NOT EXISTS (SELECT 1 FROM ${s.transactions} WHERE ${s.transactions.accountId} = ${s.brokerageAccounts.id})`,
+      ),
+    );
+  await tx
+    .delete(s.connections)
+    .where(
+      and(
+        eq(s.connections.userId, userId),
+        authorizationIds.length > 0 ? notInArray(s.connections.snaptradeAuthorizationId, authorizationIds) : undefined,
+        sql`NOT EXISTS (SELECT 1 FROM ${s.brokerageAccounts} WHERE ${s.brokerageAccounts.connectionId} = ${s.connections.id})`,
       ),
     );
   return counts;
@@ -411,6 +442,7 @@ export async function syncUser(
       for (const t of f.activities.transactions) currencies.add(t.currency);
       for (const h of f.holdings) currencies.add(h.currency);
       for (const b of f.balances) currencies.add(b.currency);
+      if (f.holdingsUnreported && f.account.reportedTotalCurrency) currencies.add(f.account.reportedTotalCurrency);
     }
     const fx = await syncFxRates(db, currencies, range?.first ?? today, today);
 

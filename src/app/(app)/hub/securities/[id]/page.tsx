@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ChevronDown, ChevronLeft, CircleCheck, Layers, TriangleAlert } from "lucide-react";
+import { ChevronDown, ChevronLeft, CircleCheck, Info, Layers, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { EmptyState } from "@/components/empty-state";
@@ -20,9 +20,12 @@ import { requireUser } from "@/server/auth/session";
 import { getDb } from "@/server/db";
 import { type AuditStep, type SecurityDetail, canonicalSecurityId, getSecurityDetail } from "@/server/queries/security";
 import { torontoToday } from "@/server/recompute";
+import { waitingUntil } from "@/server/reconciliation";
 import { D } from "@/tax-engine";
 
 export const metadata: Metadata = { title: "Security" };
+
+const listFormat = new Intl.ListFormat("en-CA", { type: "conjunction" });
 
 const GAIN_LABELS: Record<SecurityDetail["gains"][number]["kind"], string> = {
   sale: "Sale",
@@ -142,17 +145,28 @@ function AuditTrail({ steps }: { steps: AuditStep[] }) {
   );
 }
 
+/** What a non-matching row means for the user, in words. */
+function gapText(r: SecurityDetail["reconciliation"][number], gap: InstanceType<typeof D>): string {
+  const units = r.status === "broker_has_more" ? `${formatQuantity(gap.toString())} units with no history` : `${formatQuantity(gap.neg().toString())} units unaccounted for`;
+  if (r.gapClass === "registered") return `${units}, no effect on tax`;
+  if (r.gapClass === "waiting") return `${units}, waiting for the broker to report recent trades`;
+  return units;
+}
+
 function Reconciliation({ rows }: { rows: SecurityDetail["reconciliation"] }) {
   if (rows.length === 0) return <p className="text-body-sm text-muted-foreground">The brokers report no units of this security.</p>;
   return (
     <ul className="flex flex-col divide-y divide-border rounded-md border">
       {rows.map((r, i) => {
         const gap = new D(r.brokerQuantity).minus(r.ledgerQuantity);
+        const ok = r.status === "match" || r.gapClass === "registered";
         return (
           <li key={i} className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex items-center gap-2">
               {r.status === "match" ? (
                 <CircleCheck aria-hidden className="size-4 shrink-0 text-positive" />
+              ) : ok || r.gapClass === "waiting" ? (
+                <Info aria-hidden className="size-4 shrink-0 text-muted-foreground" />
               ) : (
                 <TriangleAlert aria-hidden className="size-4 shrink-0 text-negative" />
               )}
@@ -162,17 +176,43 @@ function Reconciliation({ rows }: { rows: SecurityDetail["reconciliation"] }) {
             </div>
             <span className="text-body-sm tabular-nums text-muted-foreground">
               Ledger {formatQuantity(r.ledgerQuantity)} · Broker {formatQuantity(r.brokerQuantity)}
-              {r.status !== "match" && (
-                <span className="text-negative">
-                  {" "}
-                  · {r.status === "broker_has_more" ? `${formatQuantity(gap.toString())} units with no history` : `${formatQuantity(gap.neg().toString())} units unaccounted for`}
-                </span>
-              )}
+              {r.status !== "match" && <span className={r.gapClass === "tax" ? "text-negative" : undefined}> · {gapText(r, gap)}</span>}
             </span>
           </li>
         );
       })}
     </ul>
+  );
+}
+
+/** A card, or on a registered-only security a closed one: out of the way, but one click from the same form. */
+function Section({ title, description, collapsed, children }: { title: string; description: React.ReactNode; collapsed: boolean; children: React.ReactNode }) {
+  const header = (
+    <>
+      <CardTitle>{title}</CardTitle>
+      <CardDescription>{description}</CardDescription>
+    </>
+  );
+  if (!collapsed) {
+    return (
+      <Card>
+        <CardHeader>{header}</CardHeader>
+        <CardContent>{children}</CardContent>
+      </Card>
+    );
+  }
+  return (
+    <Card>
+      <details className="group">
+        <summary className="cursor-pointer list-none rounded-md hover:bg-accent/50 [&::-webkit-details-marker]:hidden">
+          <CardHeader className="flex-row items-start justify-between gap-4">
+            <span className="flex flex-col gap-1">{header}</span>
+            <ChevronDown aria-hidden className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+          </CardHeader>
+        </summary>
+        <CardContent>{children}</CardContent>
+      </details>
+    </Card>
   );
 }
 
@@ -188,9 +228,15 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
   if (!detail) notFound();
   const { security, position } = detail;
 
-  const pooledGap = detail.reconciliation.find((r) => r.accountName === null && r.status === "broker_has_more");
-  const gaps = detail.reconciliation.filter((r) => r.status !== "match");
+  const pooledRow = detail.reconciliation.find((r) => r.accountId === null);
+  const pooledGap = pooledRow?.status === "broker_has_more" ? pooledRow : undefined;
+  const taxGap = pooledRow?.gapClass === "tax";
+  const waiting = pooledRow?.gapClass === "waiting" ? pooledRow : undefined;
+  const registeredGaps = detail.reconciliation.some((r) => r.gapClass === "registered");
   const suggestedQuantity = pooledGap ? new D(pooledGap.brokerQuantity).minus(pooledGap.ledgerQuantity).toString() : null;
+  const registeredOnly = detail.registeredOnlyIn;
+  // The opening balance is a non-registered ACB; a security that never touched one has nothing to open.
+  const showOpening = !user.isDemo && !registeredOnly && (position !== null || pooledRow !== undefined || detail.opening !== null);
 
   return (
     <>
@@ -201,9 +247,28 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
       <PageHeader
         title={security.symbol}
         description={[security.name, security.exchange, security.currency].filter(Boolean).join(" · ")}
-        actions={gaps.length > 0 ? <Badge variant="negative">Ledger does not match broker</Badge> : detail.reconciliation.length > 0 ? <Badge variant="positive">Matches broker</Badge> : undefined}
+        actions={
+          taxGap ? (
+            <Badge variant="negative">Ledger does not match broker</Badge>
+          ) : waiting ? (
+            <Badge variant="outline">Waiting for broker</Badge>
+          ) : detail.reconciliation.length > 0 && !registeredOnly ? (
+            <Badge variant="positive">Matches broker</Badge>
+          ) : undefined
+        }
       />
 
+      {registeredOnly && (
+        <p className="flex items-start gap-2 rounded-md border border-border px-4 py-3 text-body-sm text-muted-foreground">
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Held only in your {listFormat.format(registeredOnly)}, so nothing here affects your tax: registered accounts have no ACB, and their
+            gains and dividends are not reported.
+          </span>
+        </p>
+      )}
+
+      {!registeredOnly && (
       <section aria-label="Position" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatCard label="Units (non-registered)" value={formatQuantity(position?.quantity ?? 0)} hint="Pooled across brokerages" />
         <StatCard
@@ -222,7 +287,9 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
           hint={detail.marketValueCad ? `Market value ${formatMoney(detail.marketValueCad, "CAD", { hidden })}` : "No price yet"}
         />
       </section>
+      )}
 
+      {!registeredOnly && (
       <Card id="audit">
         <CardHeader>
           <CardTitle>ACB audit trail</CardTitle>
@@ -235,8 +302,9 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
           <AuditTrail steps={detail.audit} />
         </CardContent>
       </Card>
+      )}
 
-      <Card>
+      <Card id="reconciliation">
         <CardHeader>
           <CardTitle>Ledger vs broker</CardTitle>
           <CardDescription>
@@ -245,24 +313,26 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <Reconciliation rows={detail.reconciliation} />
-          {gaps.some((g) => g.accountName !== null) && (
+          {waiting && (
+            <p className="text-caption text-muted-foreground">
+              This gap appeared on {formatDate(waiting.gapSince!)}. Brokers often count a new trade in their holdings a day or so before they
+              report it as an activity, so TaxBack waits until {formatDate(waitingUntil(waiting.gapSince!))} before asking you about it.
+            </p>
+          )}
+          {registeredGaps && (
             <p className="text-caption text-muted-foreground">
               Registered accounts have no ACB, so a gap there only affects superficial loss checks. It usually means the broker shared less history
-              than you have.
+              than you have, and there is nothing to enter.
             </p>
           )}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Listings and dividends</CardTitle>
-          <CardDescription>
-            The same shares on different exchanges are identical property: one ACB pool, and a purchase on either listing counts for superficial
-            losses. Each trade is still converted at its own date&apos;s rate.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+      <Section
+        title="Listings and dividends"
+        description="The same shares on different exchanges are identical property: one ACB pool, and a purchase on either listing counts for superficial losses. Each trade is still converted at its own date's rate."
+        collapsed={registeredOnly !== null}
+      >
           <ListingPool
             poolId={security.id}
             symbol={security.symbol}
@@ -272,8 +342,7 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
             automaticDividendClass={detail.automaticDividendClass}
             readOnly={user.isDemo}
           />
-        </CardContent>
-      </Card>
+      </Section>
 
       {position && Number(position.quantity) > 0 && (
         <Card>
@@ -337,14 +406,16 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
         </Card>
       )}
 
-      {!user.isDemo && (
+      {showOpening && (
         <Card id="opening">
           <CardHeader>
             <CardTitle>Opening balance</CardTitle>
             <CardDescription>
-              {pooledGap
-                ? `Your brokers hold ${formatQuantity(suggestedQuantity ?? "0")} more units than the history explains, usually shares transferred in or bought before the history SnapTrade shares. Enter what they cost.`
-                : "For a position whose history is older than what your broker shares."}
+              {waiting
+                ? `Your brokers hold ${formatQuantity(suggestedQuantity ?? "0")} more units than the history explains, most likely a recent trade not reported yet. If the gap is still here on ${formatDate(waitingUntil(waiting.gapSince!))}, enter what those units cost.`
+                : pooledGap
+                  ? `Your brokers hold ${formatQuantity(suggestedQuantity ?? "0")} more units than the history explains, usually shares transferred in or bought before the history SnapTrade shares. Enter what they cost.`
+                  : "For a position whose history is older than what your broker shares."}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -353,19 +424,19 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
               symbol={security.symbol}
               existing={detail.opening}
               // Dated at the first known activity, the opening holds only what came before it: the gap itself.
-              suggestedQuantity={suggestedQuantity}
+              suggestedQuantity={waiting ? null : suggestedQuantity}
               suggestedDate={detail.firstActivityDate}
             />
           </CardContent>
         </Card>
       )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Corporate actions</CardTitle>
-          <CardDescription>Spinoffs and mergers move ACB between securities. Record them here, since brokers do not report them cleanly.</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
+      <Section
+        title="Corporate actions"
+        description="Spinoffs and mergers move ACB between securities. Record them here, since brokers do not report them cleanly."
+        collapsed={registeredOnly !== null}
+      >
+        <div className="flex flex-col gap-4">
           {detail.corporateActions.length > 0 && (
             <ul className="flex flex-col divide-y divide-border rounded-md border">
               {detail.corporateActions.map((a) => {
@@ -394,8 +465,8 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
           ) : (
             <CorporateActionForm securityId={security.id} symbol={security.symbol} currency={security.currency} others={detail.otherSecurities} />
           )}
-        </CardContent>
-      </Card>
+        </div>
+      </Section>
     </>
   );
 }

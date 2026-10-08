@@ -29,7 +29,13 @@ export const accountSchema = z.object({
       unifiedAccountType: z.string().nullish(),
     })
     .nullish(),
-  balance: z.object({ total: z.object({ currency: z.string().nullish() }).nullish() }).nullish(),
+  /**
+   * The broker's total for the account, holdings and cash. It is the only value SnapTrade gives for
+   * accounts whose positions it does not list, such as Wealthsimple managed portfolios.
+   */
+  balance: z
+    .object({ total: z.object({ amount: numeric.nullish(), currency: z.string().nullish() }).nullish() })
+    .nullish(),
 });
 export type SnapTradeAccount = z.infer<typeof accountSchema>;
 

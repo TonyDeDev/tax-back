@@ -251,6 +251,19 @@ function harvestSection(view: TaxYearView): Cell[][] {
   ];
 }
 
+/** The amounts to enter, by form and line, exactly as the Tax Center lists them. */
+function returnSection(view: TaxYearView): Cell[][] {
+  const r = view.returnView;
+  return [
+    ["For your return"],
+    ...(r.verified ? [] : [[`Line numbers are from the ${r.formYear} forms; check them once CRA publishes the ${view.year} forms.`]]),
+    ["Form", "Line", "What it is", "Amount (CAD)", "Note"],
+    ...r.lines.map((l) => [l.form, l.line ?? "", l.label, l.amountCad, l.note ?? ""]),
+    ...(r.netCapitalLossCad ? [["", "", "Net capital loss to carry back or forward (not on line 12700)", r.netCapitalLossCad, ""]] : []),
+    ...(r.checks.length > 0 ? [[], ["Check first"], ...r.checks.map((c) => [c.text])] : []),
+  ];
+}
+
 /** `generatedOn` is passed in so the caller owns the clock and tests stay fixed. */
 export function taxYearCsv(view: TaxYearView, generatedOn: string): string {
   return toCsv([
@@ -261,6 +274,8 @@ export function taxYearCsv(view: TaxYearView, generatedOn: string): string {
       "Rounding",
       "Every total is calculated at full precision and rounded once, so adding up a printed column can land a cent or two away from it. The Summary holds the figures to file.",
     ],
+    [],
+    ...returnSection(view),
     [],
     ...summarySection(view),
     [],

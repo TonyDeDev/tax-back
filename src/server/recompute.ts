@@ -125,7 +125,7 @@ export async function loadEngineInput(db: AnyDb, userId: string, today: string):
 export async function recomputeUser(db: AnyDb, userId: string, today: string): Promise<void> {
   const { input, openingIds } = await loadEngineInput(db, userId, today);
   const result = computeTax(input);
-  await replaceDerived(db, userId, toDerivedRows(userId, result, openingIds, today));
+  await replaceDerived(db, userId, toDerivedRows(userId, result, openingIds, today), today);
   await db.update(s.userProfiles).set({ lastRecomputedAt: new Date() }).where(eq(s.userProfiles.userId, userId));
 }
 

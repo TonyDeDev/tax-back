@@ -176,6 +176,14 @@ export const brokerageAccounts = pgTable(
     accountTypeConfirmedAt: instant("account_type_confirmed_at"),
     /** Earliest activity SnapTrade returned for this account. */
     historyCompleteFrom: day("history_complete_from"),
+    /** The broker's total for the account (holdings and cash) at the last sync, in `reported_total_currency`. */
+    reportedTotal: money("reported_total"),
+    reportedTotalCurrency: text("reported_total_currency"),
+    /**
+     * SnapTrade lists no positions for this account although its total says it holds securities
+     * (Wealthsimple managed portfolios). Its value is then the reported total.
+     */
+    holdingsUnreported: boolean("holdings_unreported").notNull().default(false),
     createdAt: createdAt(),
     updatedAt: updatedAt(),
   },
@@ -189,6 +197,11 @@ export const brokerageAccounts = pgTable(
     }).onDelete("cascade"),
     index("idx_brokerage_accounts_connection").on(t.connectionId, t.userId),
     currencyCheck("brokerage_accounts_base_currency_check", "base_currency"),
+    currencyCheck("brokerage_accounts_reported_total_currency_check", "reported_total_currency"),
+    check(
+      "brokerage_accounts_reported_total_check",
+      sql`(reported_total IS NULL) = (reported_total_currency IS NULL) AND (NOT holdings_unreported OR reported_total IS NOT NULL)`,
+    ),
     check("brokerage_accounts_account_type_check", inList("account_type", ACCOUNT_TYPES)),
     check("brokerage_accounts_kind_check", inList("kind", ACCOUNT_KINDS)),
   ],
@@ -785,6 +798,9 @@ export const taxYearSummaries = pgTable(
     taxableCapitalGainCad: money("taxable_capital_gain_cad").notNull(),
     eligibleDividendsCad: money("eligible_dividends_cad").notNull(),
     nonEligibleDividendsCad: money("non_eligible_dividends_cad").notNull(),
+    /** After the gross-up: what T1 lines 12000 and 12010 ask for. */
+    eligibleTaxableCad: money("eligible_taxable_cad").notNull().default("0"),
+    nonEligibleTaxableCad: money("non_eligible_taxable_cad").notNull().default("0"),
     foreignIncomeCad: money("foreign_income_cad").notNull(),
     foreignWithholdingCad: money("foreign_withholding_cad").notNull(),
     federalDividendCreditCad: money("federal_dividend_credit_cad").notNull(),
@@ -841,6 +857,11 @@ export const positionReconciliations = pgTable(
     ledgerQuantity: quantity("ledger_quantity").notNull(),
     brokerQuantity: quantity("broker_quantity").notNull(),
     status: text("status", { enum: RECONCILIATION_STATUSES }).notNull(),
+    /**
+     * The day a gap appeared on a later sync, carried across recomputes while it lasts. Null for a match,
+     * or for a gap present since the first sync (history the broker never shared).
+     */
+    gapSince: day("gap_since"),
   },
   (t) => [
     unique("position_reconciliations_key").on(t.userId, t.securityId, t.accountId).nullsNotDistinct(),

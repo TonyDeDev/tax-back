@@ -246,6 +246,9 @@ export interface YearSummary {
   taxableCapitalGainCad: Dec;
   eligibleDividendsCad: Dec;
   nonEligibleDividendsCad: Dec;
+  /** The taxable amounts after the gross-up: T1 lines 12010 (eligible) and 12000 (both). */
+  eligibleTaxableCad: Dec;
+  nonEligibleTaxableCad: Dec;
   foreignIncomeCad: Dec;
   foreignWithholdingCad: Dec;
   federalDividendCreditCad: Dec;

@@ -13,6 +13,7 @@ const EMPTY: TaxYearView = {
   dividends: [],
   harvest: [],
   marginalRate: null,
+  returnView: { formYear: 2025, verified: true, lines: [], netCapitalLossCad: null, checks: [], t3Symbols: [] },
 };
 
 describe("toCsv", () => {
@@ -97,6 +98,8 @@ describe("taxYearCsv", () => {
           taxableCapitalGainCad: "0",
           eligibleDividendsCad: "0",
           nonEligibleDividendsCad: "0",
+          eligibleTaxableCad: "0",
+          nonEligibleTaxableCad: "0",
           foreignIncomeCad: "0",
           foreignWithholdingCad: "0",
           federalDividendCreditCad: "0",
@@ -109,6 +112,29 @@ describe("taxYearCsv", () => {
     );
     expect(csv).toContain("Estimated tax on capital gains,not estimated (no marginal rate set)");
     expect(csv).toContain("Inclusion rate,50%");
+  });
+
+  it("opens with the lines to enter, the checks to make first, and flags line numbers from an earlier form", () => {
+    const csv = taxYearCsv(
+      {
+        ...EMPTY,
+        year: 2026,
+        returnView: {
+          formYear: 2025,
+          verified: false,
+          lines: [{ key: "t1-12700", form: "T1", line: "12700", label: "Taxable capital gains", amountCad: "114.81", note: null }],
+          netCapitalLossCad: null,
+          checks: [{ key: "gap-x", text: "VFV: your brokers hold more units than the history explains, so its ACB may be wrong.", href: null, linkLabel: null }],
+          t3Symbols: [],
+        },
+      },
+      "2026-10-07",
+    );
+    expect(csv).toContain("For your return\r\nLine numbers are from the 2025 forms; check them once CRA publishes the 2026 forms.\r\n");
+    expect(csv).toContain("T1,12700,Taxable capital gains,114.81,\r\n");
+    // The check holds a comma, so its cell is quoted.
+    expect(csv).toContain('Check first\r\n"VFV: your brokers hold more units than the history explains, so its ACB may be wrong."\r\n');
+    expect(csv.indexOf("\r\nFor your return\r\n")).toBeLessThan(csv.indexOf("\r\nSummary\r\n"));
   });
 });
 

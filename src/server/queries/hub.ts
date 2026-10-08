@@ -6,6 +6,7 @@ import type { AnyDb } from "@/server/db/types";
 import type { WarningView } from "@/lib/warnings";
 import { latestRates } from "@/server/fx/boc";
 import type { SyncErrorCode } from "@/server/sync/sync";
+import { gapClass } from "@/server/reconciliation";
 import { accountValue, valueHoldings } from "@/server/valuation";
 import { D, type AccountType, type Dec } from "@/tax-engine";
 import { addDays, yearOf } from "@/tax-engine/dates";
@@ -23,6 +24,8 @@ export interface HubAccount {
   /** Cash accounts hold no securities, so their type does not matter and is never asked for. */
   kind: "investment" | "cash";
   confirmed: boolean;
+  /** SnapTrade does not list this account's holdings, so its value is the broker's reported total. */
+  holdingsUnreported: boolean;
   /** Holdings plus cash in CAD (unrounded, so sums match the total), or null when an FX rate is missing. */
   valueCad: string | null;
 }
@@ -39,6 +42,14 @@ export interface HubBrokerage {
   totalIncomplete: boolean;
 }
 
+/** A SnapTrade connection with no accounts listed yet, e.g. a new Interactive Brokers connection still syncing. */
+export interface HubPendingBrokerage {
+  id: string;
+  name: string;
+  status: "active" | "broken";
+  statusDetail: string | null;
+}
+
 export interface HubSync {
   status: "running" | "succeeded" | "failed";
   startedAt: Date;
@@ -50,6 +61,8 @@ export interface HubSync {
 
 export interface HubSummary {
   brokerages: HubBrokerage[];
+  /** Connections SnapTrade lists no accounts for; kept out of `brokerages`, the filter, and the totals. */
+  pendingBrokerages: HubPendingBrokerage[];
   totalValueCad: string;
   /** True when some value could not be converted to CAD, so the total leaves it out. */
   totalIncomplete: boolean;
@@ -111,6 +124,7 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
         accountType: s.brokerageAccounts.accountType,
         kind: s.brokerageAccounts.kind,
         confirmedAt: s.brokerageAccounts.accountTypeConfirmedAt,
+        holdingsUnreported: s.brokerageAccounts.holdingsUnreported,
       })
       .from(s.brokerageAccounts)
       .where(eq(s.brokerageAccounts.userId, userId))
@@ -156,12 +170,14 @@ export async function getHubSummary(db: AnyDb, userId: string, today: string): P
       accountType: a.accountType,
       kind: a.kind,
       confirmed: a.confirmedAt !== null,
+      holdingsUnreported: a.holdingsUnreported,
       valueCad: v === null ? null : v.toFixed(6),
     });
     byConnection.set(a.connectionId, list);
   }
 
   return {
+    pendingBrokerages: connections.filter((c) => !byConnection.has(c.id)),
     brokerages: connections
       .map((c) => ({ ...c, accounts: byConnection.get(c.id) ?? [] }))
       .filter((c) => c.accounts.length > 0)
@@ -292,32 +308,54 @@ export interface ReconciliationGap {
   ledgerQuantity: string;
   brokerQuantity: string;
   status: "broker_has_more" | "ledger_has_more";
+  /** The day a gap appeared on a later sync; null when it has been there since the first one. */
+  gapSince: string | null;
 }
 
 export interface ReconciliationSummary {
+  /** Non-registered positions only, pooled per security: the ones ACB depends on. */
   matched: number;
   total: number;
+  /** Non-registered gaps that change tax: the user is asked to fix these. */
   gaps: ReconciliationGap[];
+  /** Non-registered gaps that appeared in the last few days, likely trades the broker has not reported yet. */
+  waiting: ReconciliationGap[];
+  /** Gaps inside registered accounts: no ACB, so no effect on tax. */
+  registered: ReconciliationGap[];
 }
 
-/** "Ledger matches broker positions": how many positions agree, and the ones that do not. */
-export async function getReconciliation(db: AnyDb, userId: string): Promise<ReconciliationSummary> {
+/** "Ledger matches broker positions": how many positions agree, and the ones that do not, by class. */
+export async function getReconciliation(db: AnyDb, userId: string, today: string): Promise<ReconciliationSummary> {
   const rows = await db
     .select({
       securityId: s.positionReconciliations.securityId,
       symbol: s.securities.symbol,
+      accountId: s.positionReconciliations.accountId,
       accountName: s.brokerageAccounts.name,
       ledgerQuantity: s.positionReconciliations.ledgerQuantity,
       brokerQuantity: s.positionReconciliations.brokerQuantity,
       status: s.positionReconciliations.status,
+      gapSince: s.positionReconciliations.gapSince,
     })
     .from(s.positionReconciliations)
     .innerJoin(s.securities, eq(s.securities.id, s.positionReconciliations.securityId))
     .leftJoin(s.brokerageAccounts, eq(s.brokerageAccounts.id, s.positionReconciliations.accountId))
     .where(eq(s.positionReconciliations.userId, userId))
     .orderBy(asc(s.securities.symbol));
-  const gaps = rows.flatMap((r) => (r.status === "match" ? [] : [{ ...r, status: r.status }]));
-  return { matched: rows.length - gaps.length, total: rows.length, gaps };
+  const pooled = rows.filter((r) => r.accountId === null);
+  const summary: ReconciliationSummary = {
+    matched: pooled.filter((r) => r.status === "match").length,
+    total: pooled.length,
+    gaps: [],
+    waiting: [],
+    registered: [],
+  };
+  const bucket = { tax: summary.gaps, waiting: summary.waiting, registered: summary.registered };
+  for (const { accountId, status, ...r } of rows) {
+    if (status === "match") continue;
+    bucket[gapClass({ accountId, gapSince: r.gapSince }, today)].push({ ...r, status });
+  }
+  return summary;
 }
 
 /** Recent daily CAD prices per listing, oldest first, from the snapshots each sync writes. */

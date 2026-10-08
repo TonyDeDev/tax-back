@@ -299,6 +299,8 @@ export function toDerivedRows(
       taxableCapitalGainCad: moneyText(y.taxableCapitalGainCad),
       eligibleDividendsCad: moneyText(y.eligibleDividendsCad),
       nonEligibleDividendsCad: moneyText(y.nonEligibleDividendsCad),
+      eligibleTaxableCad: moneyText(y.eligibleTaxableCad),
+      nonEligibleTaxableCad: moneyText(y.nonEligibleTaxableCad),
       foreignIncomeCad: moneyText(y.foreignIncomeCad),
       foreignWithholdingCad: moneyText(y.foreignWithholdingCad),
       federalDividendCreditCad: moneyText(y.federalDividendCreditCad),

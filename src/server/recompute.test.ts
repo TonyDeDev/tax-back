@@ -127,9 +127,11 @@ describe("recompute", () => {
     expect(pooled).toMatchObject({ ledgerQuantity: "60.0000000000", brokerQuantity: "85.0000000000", status: "broker_has_more" });
     expect(tfsa).toMatchObject({ status: "match" });
 
-    const summary = await getReconciliation(db, U);
-    expect(summary).toMatchObject({ matched: 2, total: 3 });
-    expect(summary.gaps).toEqual([expect.objectContaining({ symbol: "XYZ", accountName: null, status: "broker_has_more" })]);
+    const summary = await getReconciliation(db, U, TODAY);
+    // Only the pooled non-registered rows count: the ones ACB depends on.
+    expect(summary).toMatchObject({ matched: 1, total: 2, waiting: [], registered: [] });
+    // Seen on the first reconciliation, so it is missing history, not a delay: the user is asked at once.
+    expect(summary.gaps).toEqual([expect.objectContaining({ symbol: "XYZ", accountName: null, status: "broker_has_more", gapSince: null })]);
   });
 
   it("an opening balance closes the gap", async () => {
@@ -140,7 +142,26 @@ describe("recompute", () => {
       .from(s.positionReconciliations)
       .where(and(eq(s.positionReconciliations.securityId, ids.xyz), isNull(s.positionReconciliations.accountId)));
     expect(pooled).toMatchObject({ ledgerQuantity: "85.0000000000", status: "match" });
-    expect(await getReconciliation(db, U)).toMatchObject({ matched: 3, total: 3, gaps: [] });
+    expect(await getReconciliation(db, U, TODAY)).toMatchObject({ matched: 2, total: 2, gaps: [] });
+  });
+
+  it("gives a gap that appears after a match a few days to resolve, and keeps its first day", async () => {
+    await db.delete(s.manualAdjustments).where(eq(s.manualAdjustments.securityId, ids.xyz));
+    await recomputeUser(db, U, TODAY);
+    let summary = await getReconciliation(db, U, TODAY);
+    expect(summary.gaps).toEqual([]);
+    expect(summary.waiting).toEqual([expect.objectContaining({ symbol: "XYZ", gapSince: TODAY })]);
+
+    // Still there three days later: the day carries across recomputes, and it becomes a gap to fix.
+    const later = "2026-01-03";
+    await recomputeUser(db, U, later);
+    summary = await getReconciliation(db, U, later);
+    expect(summary.waiting).toEqual([]);
+    expect(summary.gaps).toEqual([expect.objectContaining({ symbol: "XYZ", gapSince: TODAY })]);
+
+    // Put the opening balance back for the tests that follow.
+    await db.insert(s.manualAdjustments).values({ userId: U, securityId: ids.xyz, quantity: "25", acbCad: "300", asOfDate: "2025-01-06" });
+    await recomputeUser(db, U, TODAY);
   });
 
   it("rolls the whole change back when the engine cannot compute it", async () => {

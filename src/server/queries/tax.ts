@@ -1,9 +1,11 @@
 import "server-only";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import * as s from "@/server/db/schema";
 import type { AnyDb } from "@/server/db/types";
+import { getReconciliation } from "@/server/queries/hub";
 import { D, type AccountType, type DividendClass } from "@/tax-engine";
 import { yearOf } from "@/tax-engine/dates";
+import { returnLines, type ReturnForm } from "@/tax-engine/return-lines";
 
 /*
  * Read queries for the Tax Center. Every query is scoped by `userId` first, and every row comes from
@@ -27,6 +29,9 @@ export interface TaxYearTotals {
   taxableCapitalGainCad: string;
   eligibleDividendsCad: string;
   nonEligibleDividendsCad: string;
+  /** After the gross-up. */
+  eligibleTaxableCad: string;
+  nonEligibleTaxableCad: string;
   foreignIncomeCad: string;
   foreignWithholdingCad: string;
   federalDividendCreditCad: string;
@@ -117,6 +122,35 @@ export interface HarvestRow {
   noRebuyBefore: string;
 }
 
+export interface ReturnLineView {
+  key: string;
+  form: ReturnForm;
+  line: string | null;
+  label: string;
+  /** Rounded to cents: exactly what to type into the form. */
+  amountCad: string;
+  note: string | null;
+}
+
+/** Something that makes this year's numbers unreliable until the user looks at it. */
+export interface ReadinessCheck {
+  key: string;
+  text: string;
+  href: string | null;
+  linkLabel: string | null;
+}
+
+export interface ReturnView {
+  /** The year whose CRA forms the line numbers come from; differs from the tax year until it is verified. */
+  formYear: number;
+  verified: boolean;
+  lines: ReturnLineView[];
+  netCapitalLossCad: string | null;
+  checks: ReadinessCheck[];
+  /** Canadian ETFs that paid distributions into non-registered accounts: the T3 slip has the real split. */
+  t3Symbols: string[];
+}
+
 export interface TaxYearView {
   year: number;
   /** Harvesting windows are measured from today, so they only belong to the year in progress. */
@@ -129,6 +163,8 @@ export interface TaxYearView {
   harvest: HarvestRow[];
   /** Null means the user has not set one, so there is no tax estimate. */
   marginalRate: string | null;
+  /** What to enter on the return, and what to check first. */
+  returnView: ReturnView;
 }
 
 /** Years with tax results, newest first, always including the year in progress. */
@@ -156,6 +192,8 @@ function toTotals(row: typeof s.taxYearSummaries.$inferSelect): TaxYearTotals {
     taxableCapitalGainCad: row.taxableCapitalGainCad,
     eligibleDividendsCad: row.eligibleDividendsCad,
     nonEligibleDividendsCad: row.nonEligibleDividendsCad,
+    eligibleTaxableCad: row.eligibleTaxableCad,
+    nonEligibleTaxableCad: row.nonEligibleTaxableCad,
     foreignIncomeCad: row.foreignIncomeCad,
     foreignWithholdingCad: row.foreignWithholdingCad,
     federalDividendCreditCad: row.federalDividendCreditCad,
@@ -286,10 +324,11 @@ export async function getTaxYear(db: AnyDb, userId: string, year: number, today:
           )
           .orderBy(asc(s.brokerageAccounts.name));
 
+  const view = totals ? toTotals(totals) : null;
   return {
     year,
     isCurrentYear,
-    totals: totals ? toTotals(totals) : null,
+    totals: view,
     gains,
     superficialLosses: losses.map((l) => ({
       ...l,
@@ -298,6 +337,101 @@ export async function getTaxYear(db: AnyDb, userId: string, year: number, today:
     dividends,
     harvest,
     marginalRate: profile?.marginalRate ?? null,
+    returnView: await getReturnView(db, userId, year, today, { totals: view, gains, losses, dividends }),
+  };
+}
+
+/** The lines to enter and the readiness checks, from the rows `getTaxYear` already read. */
+async function getReturnView(
+  db: AnyDb,
+  userId: string,
+  year: number,
+  today: string,
+  read: {
+    totals: TaxYearTotals | null;
+    gains: GainRow[];
+    losses: { securityId: string; symbol: string; status: "pending" | "final" }[];
+    dividends: { securityId: string; symbol: string }[];
+  },
+): Promise<ReturnView> {
+  const { totals, gains, losses, dividends } = read;
+  const dividendIds = [...new Set(dividends.map((d) => d.securityId))];
+  const [reconciliation, unconfirmed, funds] = await Promise.all([
+    getReconciliation(db, userId, today),
+    db
+      .select({ id: s.brokerageAccounts.id })
+      .from(s.brokerageAccounts)
+      .where(
+        and(
+          eq(s.brokerageAccounts.userId, userId),
+          eq(s.brokerageAccounts.kind, "investment"),
+          isNull(s.brokerageAccounts.accountTypeConfirmedAt),
+        ),
+      ),
+    dividendIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({ symbol: s.securities.symbol })
+          .from(s.securities)
+          .where(and(inArray(s.securities.id, dividendIds), eq(s.securities.securityType, "etf"), eq(s.securities.country, "CA")))
+          .orderBy(asc(s.securities.symbol)),
+  ]);
+
+  const result = returnLines({
+    year,
+    gains: gains.map((g) => ({ date: g.dispositionDate, proceedsCad: new D(g.proceedsCad), allowedGainCad: new D(g.allowedGainCad) })),
+    totals: totals && {
+      taxableCapitalGainCad: new D(totals.taxableCapitalGainCad),
+      netCapitalGainCad: new D(totals.netCapitalGainCad),
+      eligibleTaxableCad: new D(totals.eligibleTaxableCad),
+      nonEligibleTaxableCad: new D(totals.nonEligibleTaxableCad),
+      foreignIncomeCad: new D(totals.foreignIncomeCad),
+      foreignWithholdingCad: new D(totals.foreignWithholdingCad),
+      federalDividendCreditCad: new D(totals.federalDividendCreditCad),
+    },
+  });
+
+  const checks: ReadinessCheck[] = [
+    ...reconciliation.gaps.map((g) => ({
+      key: `gap-${g.securityId}`,
+      text: `${g.symbol}: your brokers hold ${g.status === "broker_has_more" ? "more" : "fewer"} units than the history explains, so its ACB may be wrong.`,
+      href: `/hub/securities/${g.securityId}${g.status === "broker_has_more" ? "#opening" : "#reconciliation"}`,
+      linkLabel: g.status === "broker_has_more" ? "Add opening balance" : "Review",
+    })),
+    ...[...new Map(gains.filter((g) => g.incomplete).map((g) => [g.securityId, g])).values()].map((g) => ({
+      key: `incomplete-${g.securityId}`,
+      text: `${g.symbol}: a sale was larger than the known position, so its ACB is understated.`,
+      href: `/hub/securities/${g.securityId}#opening`,
+      linkLabel: "Add opening balance",
+    })),
+    ...(unconfirmed.length > 0
+      ? [
+          {
+            key: "unconfirmed",
+            text: `${unconfirmed.length} ${unconfirmed.length === 1 ? "account type is" : "account types are"} not confirmed. A TFSA or RRSP counted as non-registered changes your gains.`,
+            href: "/hub#accounts",
+            linkLabel: "Confirm",
+          },
+        ]
+      : []),
+    ...[...new Map(losses.filter((l) => l.status === "pending").map((l) => [l.securityId, l])).values()].map((l) => ({
+      key: `pending-${l.securityId}`,
+      text: `${l.symbol}: a superficial loss window is still open, so this loss can still be denied.`,
+      href: null,
+      linkLabel: null,
+    })),
+    ...(totals?.configAssumed
+      ? [{ key: "rates", text: `The tax rates for ${year} are not verified yet, so the nearest verified year was used.`, href: null, linkLabel: null }]
+      : []),
+  ];
+
+  return {
+    formYear: result.formYear,
+    verified: result.verified,
+    lines: result.lines.map((l) => ({ ...l, amountCad: l.amountCad.toFixed(2) })),
+    netCapitalLossCad: result.netCapitalLossCad?.toFixed(2) ?? null,
+    checks,
+    t3Symbols: funds.map((f) => f.symbol),
   };
 }
 

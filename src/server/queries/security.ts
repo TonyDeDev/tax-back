@@ -4,7 +4,8 @@ import * as s from "@/server/db/schema";
 import { loadUserPools, type PoolReason } from "@/server/db/pools";
 import type { AnyDb } from "@/server/db/types";
 import { latestRates } from "@/server/fx/boc";
-import { D, type AcbRule, type AccountType, type DividendClass } from "@/tax-engine";
+import { gapClass, type GapClass } from "@/server/reconciliation";
+import { D, isRegistered, type AcbRule, type AccountType, type DividendClass } from "@/tax-engine";
 
 /*
  * Read queries for the security detail page: the ACB audit trail with the source of every step, the
@@ -67,11 +68,16 @@ export interface SecurityGain {
 }
 
 export interface SecurityReconciliationRow {
+  /** Null for the pooled non-registered position. */
+  accountId: string | null;
   accountName: string | null;
   accountType: AccountType | null;
   ledgerQuantity: string;
   brokerQuantity: string;
   status: "match" | "broker_has_more" | "ledger_has_more";
+  /** Null for a match. */
+  gapClass: GapClass | null;
+  gapSince: string | null;
 }
 
 export interface CorporateActionView {
@@ -116,6 +122,11 @@ export interface SecurityDetail {
   otherSecurities: { id: string; symbol: string }[];
   /** Earliest settlement date in this security's history, the natural date for an opening balance. */
   firstActivityDate: string | null;
+  /**
+   * The registered accounts holding it when it has never touched a non-registered account (no ACB, no
+   * gains, no opening balance, no corporate action): nothing about it affects tax. Null otherwise.
+   */
+  registeredOnlyIn: string[] | null;
 }
 
 /** The canonical listing for a security id, so a page for RY (NYSE) can show the pooled RY. */
@@ -129,7 +140,7 @@ export async function getSecurityDetail(db: AnyDb, userId: string, securityId: s
   const { pools } = await loadUserPools(db, userId);
   const pooled = pools.listingsOf(securityId);
   const listingIds = pooled.length > 0 ? pooled.map((l) => l.id) : [securityId];
-  const [[security], [position], events, gains, reconciliation, [opening], corporate, holdings, firstTx] = await Promise.all([
+  const [[security], [position], events, gains, reconciliation, [opening], corporate, holdings, firstTx, accounts] = await Promise.all([
     db
       .select({ id: s.securities.id, symbol: s.securities.symbol, name: s.securities.name, currency: s.securities.currency, exchange: s.securities.exchange })
       .from(s.securities)
@@ -188,11 +199,13 @@ export async function getSecurityDetail(db: AnyDb, userId: string, securityId: s
       .orderBy(asc(s.realizedGains.dispositionDate)),
     db
       .select({
+        accountId: s.positionReconciliations.accountId,
         accountName: s.brokerageAccounts.name,
         accountType: s.brokerageAccounts.accountType,
         ledgerQuantity: s.positionReconciliations.ledgerQuantity,
         brokerQuantity: s.positionReconciliations.brokerQuantity,
         status: s.positionReconciliations.status,
+        gapSince: s.positionReconciliations.gapSince,
       })
       .from(s.positionReconciliations)
       .leftJoin(s.brokerageAccounts, eq(s.brokerageAccounts.id, s.positionReconciliations.accountId))
@@ -228,6 +241,32 @@ export async function getSecurityDetail(db: AnyDb, userId: string, securityId: s
       .where(and(eq(s.transactions.userId, userId), inArray(s.transactions.securityId, listingIds)))
       .orderBy(asc(s.transactions.settlementDate))
       .limit(1),
+    // Every account that has traded or holds it, to tell a registered-only security apart.
+    db
+      .selectDistinct({ name: s.brokerageAccounts.name, type: s.brokerageAccounts.accountType })
+      .from(s.brokerageAccounts)
+      .where(
+        and(
+          eq(s.brokerageAccounts.userId, userId),
+          or(
+            inArray(
+              s.brokerageAccounts.id,
+              db
+                .select({ id: s.transactions.accountId })
+                .from(s.transactions)
+                .where(and(eq(s.transactions.userId, userId), inArray(s.transactions.securityId, listingIds))),
+            ),
+            inArray(
+              s.brokerageAccounts.id,
+              db
+                .select({ id: s.holdings.accountId })
+                .from(s.holdings)
+                .where(and(eq(s.holdings.userId, userId), inArray(s.holdings.securityId, listingIds))),
+            ),
+          ),
+        ),
+      )
+      .orderBy(asc(s.brokerageAccounts.name)),
   ]);
   if (!security) return null;
   // Securities are shared reference data; the page only exists for ones this user has touched.
@@ -312,6 +351,15 @@ export async function getSecurityDetail(db: AnyDb, userId: string, securityId: s
     };
   });
 
+  const registeredOnly =
+    accounts.length > 0 &&
+    accounts.every((a) => isRegistered(a.type)) &&
+    !position &&
+    events.length === 0 &&
+    gains.length === 0 &&
+    !opening &&
+    corporate.length === 0;
+
   const priced = holdings.find((h) => h.price !== null);
   let marketValueCad: string | null = null;
   let unrealizedCad: string | null = null;
@@ -342,10 +390,16 @@ export async function getSecurityDetail(db: AnyDb, userId: string, securityId: s
     unrealizedCad,
     audit,
     gains,
-    reconciliation: reconciliation.map((r) => ({ ...r, accountName: r.accountName ?? null, accountType: r.accountType ?? null })),
+    reconciliation: reconciliation.map((r) => ({
+      ...r,
+      accountName: r.accountName ?? null,
+      accountType: r.accountType ?? null,
+      gapClass: r.status === "match" ? null : gapClass(r, today),
+    })),
     opening: opening ? { quantity: opening.quantity, acbCad: opening.acbCad, asOfDate: opening.asOfDate, note: opening.note } : null,
     corporateActions: actions,
     otherSecurities: seen.filter((x) => !inPool.has(x.id)),
     firstActivityDate: firstTx[0]?.date ?? null,
+    registeredOnlyIn: registeredOnly ? accounts.map((a) => a.name) : null,
   };
 }
