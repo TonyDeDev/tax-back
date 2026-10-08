@@ -3,7 +3,7 @@ import Image from "next/image";
 import type { ComponentType, SVGProps } from "react";
 import { GithubIcon, LinkedinIcon, PortfolioIcon, XIcon } from "@/components/icons/brand-icons";
 import { CopyEmailButton } from "./copy-email-button";
-import { initials, type LinkKind, type LinkRow, type TeamMember } from "./team";
+import type { LinkKind, LinkRow, TeamMember } from "./team";
 
 const ICONS: Record<LinkKind, LucideIcon | ComponentType<SVGProps<SVGSVGElement>>> = {
   linkedin: LinkedinIcon,
@@ -54,15 +54,8 @@ export function TeamCard({ member, rows }: { member: TeamMember; rows: LinkRow[]
       className="flex h-full flex-col gap-5 rounded-md border bg-card p-6 transition-motion hover:border-highlight-border"
     >
       <div className="flex items-center gap-4">
-        {member.photo ? (
+        {member.photo && (
           <Image src={member.photo} alt="" width={48} height={48} className="size-12 shrink-0 rounded-sm object-cover" />
-        ) : (
-          <span
-            aria-hidden
-            className="flex size-12 shrink-0 items-center justify-center rounded-sm border bg-muted font-display text-subheading font-semibold text-foreground"
-          >
-            {initials(member.name)}
-          </span>
         )}
         <h3 className="font-display text-heading-sm font-semibold">{member.name}</h3>
       </div>

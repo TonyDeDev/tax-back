@@ -7,8 +7,8 @@ import { Brand } from "@/components/brand";
 import { GithubIcon } from "@/components/icons/brand-icons";
 import { CandleField } from "@/components/landing/candle-field";
 import { OpenSourceSection } from "@/components/landing/open-source-section";
-import { ContactRow, TeamCard } from "@/components/landing/team-card";
-import { REPO_PATH, REPO_URL, linkRows, team } from "@/components/landing/team";
+import { TeamCard } from "@/components/landing/team-card";
+import { REPO_URL, linkRows, team } from "@/components/landing/team";
 import { Reveal } from "@/components/motion/reveal";
 import { StatusDot } from "@/components/status-dot";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -262,9 +262,6 @@ function Contact() {
             </li>
           ))}
         </ul>
-        <div className="max-w-md">
-          <ContactRow row={{ kind: "github", label: "Source code", href: REPO_URL, value: REPO_PATH }} />
-        </div>
       </div>
     </Section>
   );

@@ -35,6 +35,7 @@ export const team: TeamMember[] = [
     links: {
       linkedin: "https://www.linkedin.com/in/phuntsho-wangyal",
       portfolio: "https://phuntshowangyal.github.io/Personal-Portfolio/",
+      github: "https://github.com/phuntshoWangyal",
     },
   },
   {

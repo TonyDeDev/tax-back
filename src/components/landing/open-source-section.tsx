@@ -3,7 +3,7 @@ import { GithubIcon } from "@/components/icons/brand-icons";
 import { buttonArrowClass, buttonVariants } from "@/components/ui/button";
 import { Tag } from "@/components/ui/tag";
 import { cn } from "@/lib/utils";
-import { REPO_PATH, REPO_URL } from "./team";
+import { REPO_URL } from "./team";
 
 /**
  * The code is public: a Graphite card with the repo and an outline link to it. Outline, not filled,
@@ -21,10 +21,6 @@ export function OpenSourceSection() {
           The code is public: read exactly how every tax number is calculated, report an issue, or contribute.
         </p>
       </div>
-      <p className="flex items-center gap-2 font-mono text-body-sm text-muted-foreground">
-        <GithubIcon aria-hidden className="size-4 shrink-0" />
-        {REPO_PATH}
-      </p>
       <a
         href={REPO_URL}
         target="_blank"
