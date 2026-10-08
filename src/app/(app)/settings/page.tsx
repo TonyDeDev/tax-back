@@ -30,7 +30,11 @@ export const maxDuration = 300;
 function connectError(code: string | undefined): string | null {
   if (!code) return null;
   if (code === "access_denied") return "SnapTrade access was not granted, so nothing was connected.";
-  if (code === "account_ownership_conflict") return "That SnapTrade account is already connected to a different TaxBack account.";
+  // Better Auth's linkSocial conflict path (this flow) redirects with this code; a differently-named
+  // one (`account_ownership_conflict`) belongs to the sign-in-time linking path and never reaches here.
+  if (code === "account_already_linked_to_different_user") {
+    return "That SnapTrade account is already connected to a different TaxBack account. Sign in with that account instead, or use a different SnapTrade Personal account.";
+  }
   // The 5-minute state cookie expired, or SnapTrade returned to a different host (localhost vs 127.0.0.1).
   if (code === "state_mismatch" || code === "state_security_mismatch") {
     return "The connection timed out or came back to a different address. Click Connect with SnapTrade again and finish within 5 minutes.";

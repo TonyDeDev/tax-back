@@ -36,6 +36,15 @@ const AAPL = {
   exchange: { id: "ex-nas", code: "NASDAQ", mic_code: "XNAS", name: "Nasdaq" },
   type: { id: "t-cs", code: "cs", description: "Common Stock", is_supported: true },
 };
+// SnapTrade tags crypto against its universal USD reference, even on a Canadian broker that prices
+// and settles the position in CAD. No `exchange`: crypto has none, the way the live probe returns it.
+const XRP = {
+  id: "sym-xrp",
+  symbol: "XRP",
+  raw_symbol: "XRP",
+  description: "XRP",
+  currency: { code: "USD", name: "US Dollar", id: "cur-usd" },
+};
 
 let seq = 0;
 function activity(over: Record<string, unknown>): Record<string, unknown> {
@@ -216,6 +225,20 @@ describe("mapActivities", () => {
         figiShareClass: null,
       },
     ]);
+  });
+
+  /*
+   * A real Wealthsimple Crypto sync: the symbol's own currency is USD (crypto's universal pricing
+   * reference), but the activity's `amount` and the live position's `price` are in CAD, the account's
+   * actual settlement currency. The security this activity builds must agree with what a live position
+   * for the same crypto builds (see "prices a position in its own currency" in mapPositions below), or a
+   * later sync forks the same real asset into two security rows under different currencies.
+   */
+  it("prices a crypto trade in the account's settlement currency, not the symbol's reference currency", () => {
+    const [buy] = mapActivities([
+      activity({ type: "BUY", symbol: XRP, units: 204.7356575200, price: 1.924922, amount: -394.1, currency: { code: "CAD" } }),
+    ]).transactions;
+    expect(buy).toMatchObject({ kind: "buy", currency: "CAD", snaptradeSymbolId: "sym-xrp" });
   });
 
   it("maps reinvested dividends as DRIP purchases", () => {
@@ -553,6 +576,40 @@ describe("mapPositions and mapBalances", () => {
     expect(holdings[0]!.marketValue!.toString()).toBe("10650.44442");
     expect(holdings[0]!.brokerBookValue!.toFixed(2)).toBe("9390.04");
     expect(skipped).toEqual({ "position:option": 1 });
+  });
+
+  /*
+   * A real Wealthsimple Crypto sync: SnapTrade tags the instrument's currency as USD (crypto's
+   * universal pricing reference) while the position itself is priced and settled in CAD for a Canadian
+   * account. Taking `instrument.currency` converted an already-CAD price as though it were USD,
+   * inflating a $571 CAD holding into a reported $814 - a real discrepancy a user caught in production.
+   */
+  it("prices a position in its own currency, not the instrument's reference currency", () => {
+    const { holdings, securities } = mapPositions([
+      {
+        instrument: { kind: "crypto", id: "sym-xrp", symbol: "XRP", raw_symbol: "XRP", currency: "USD" },
+        units: "204.7356575200",
+        price: "1.924922",
+        cost_basis: "1.07",
+        currency: "CAD",
+      },
+    ]);
+    expect(securities[0]).toMatchObject({ symbol: "XRP", currency: "CAD" });
+    expect(holdings[0]!.currency).toBe("CAD");
+    // 204.7356575200 * 1.924922, read as CAD: no FX conversion belongs on top of this.
+    expect(holdings[0]!.marketValue!.toFixed(2)).toBe("394.10");
+  });
+
+  it("falls back to the instrument's currency when the position gives none", () => {
+    const { securities } = mapPositions([
+      {
+        instrument: { kind: "stock", id: "sym-aapl", symbol: "AAPL", raw_symbol: "AAPL", currency: "USD" },
+        units: "5",
+        price: "180.5",
+        currency: null,
+      },
+    ]);
+    expect(securities[0]).toMatchObject({ symbol: "AAPL", currency: "USD" });
   });
 
   it("sums cash per currency and ignores unknown balances", () => {

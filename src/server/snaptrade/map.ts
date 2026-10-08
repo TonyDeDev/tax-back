@@ -241,14 +241,22 @@ function securityTypeOf(code: string | null | undefined): SecurityType {
   }
 }
 
-export function securityFromSymbol(symbol: SnapTradeSymbol): MappedSecurity {
+/**
+ * `preferredCurrency` is the activity's own top-level currency, when the caller has one. SnapTrade
+ * quotes a crypto symbol's currency against USD (its universal reference), but a Canadian broker
+ * prices and settles the position itself in CAD; the two agree for a stock but not for crypto. The
+ * activity's own currency is what `price` and `amount` are actually denominated in, so it must win -
+ * `mapPositions` resolves the same conflict the same way, for the same reason, so a security built
+ * from either an activity or a live position lands on one currency rather than forking into two rows.
+ */
+export function securityFromSymbol(symbol: SnapTradeSymbol, preferredCurrency?: string | null): MappedSecurity {
   const exchange = symbol.exchange?.mic_code || symbol.exchange?.code || null;
   return {
     snaptradeSymbolId: symbol.id,
     symbol: symbol.raw_symbol || symbol.symbol,
     exchange,
     name: symbol.description ?? null,
-    currency: symbol.currency.code,
+    currency: [preferredCurrency, symbol.currency.code].find(isCurrency) ?? symbol.currency.code,
     securityType: securityTypeOf(symbol.type?.code),
     country: countryOf(exchange),
     figiShareClass: symbol.figi_instrument?.figi_share_class || null,
@@ -286,7 +294,14 @@ export function mapPositions(positions: readonly SnapTradePosition[]): {
 
   for (const p of positions) {
     const { instrument } = p;
-    const currency = [instrument.currency, p.currency].find(isCurrency);
+    /*
+     * `price` and `cost_basis` are quoted in the position's own `currency`, not the instrument's. For a
+     * stock the two agree, so this went unnoticed; crypto is quoted against USD by `instrument.currency`
+     * (its universal reference) while a Canadian broker settles and prices the position itself in CAD.
+     * Taking `instrument.currency` here converted an already-CAD price as though it were USD, inflating
+     * the holding by the FX rate. The position's own currency must win whenever SnapTrade sends one.
+     */
+    const currency = [p.currency, instrument.currency].find(isCurrency);
     const symbol = instrument.raw_symbol || instrument.symbol;
     if (!HOLDING_KINDS.has(instrument.kind) || !instrument.id || !currency || !symbol) {
       skipped[`position:${instrument.kind}`] = (skipped[`position:${instrument.kind}`] ?? 0) + 1;
@@ -577,7 +592,7 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
       skip(`OPTION_${a.type}`);
       continue;
     }
-    const security = a.symbol ? securityFromSymbol(a.symbol) : null;
+    const security = a.symbol ? securityFromSymbol(a.symbol, a.currency?.code) : null;
     if (security) securities.set(security.snaptradeSymbolId, security);
     const units = dec(a.units).abs();
 
