@@ -77,11 +77,16 @@
 
 /* Semantic colors (shadcn/ui names + TaxBack extras). Light is the default. */
 :root {
-  --background: #ffffff;
+  /*
+   * Light mirrors the dark ladder rather than inverting it: the canvas is the furthest surface and
+   * cards lift above it. A pure-white canvas glared on big pages and left cards, which were darker
+   * than the page, reading as holes rather than panels. White is now the raised surface.
+   */
+  --background: #f7f8fa;
   --foreground: #0f172a;
-  --card: #f6f8fa;
+  --card: #ffffff;
   --card-foreground: #0f172a;
-  --popover: #f6f8fa;
+  --popover: #ffffff;
   --popover-foreground: #0f172a;
   --muted: #eef1f4;
   /* Steel: a palette neutral at 8.6:1 on cards (the old blue-gray was 5.5:1 and off-palette). */
