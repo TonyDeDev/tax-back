@@ -1,11 +1,24 @@
-import { addDays } from "./dates";
+import { addDays, nextBusinessDay } from "./dates";
 import { D, ZERO, type Dec } from "./decimal";
+import { SUPERFICIAL_WINDOW_DAYS } from "./superficial";
 import type { AcbPosition, FxLookup, HarvestOpportunity, LedgerEntry, MarketPrice } from "./types";
+
+/** The superficial loss window of a sale traded on `trade`: 30 days either side of its T+1 settlement, as the engine judges it. */
+function windowOf(trade: string): { start: string; end: string } {
+  const settles = nextBusinessDay(trade);
+  return { start: addDays(settles, -SUPERFICIAL_WINDOW_DAYS), end: addDays(settles, SUPERFICIAL_WINDOW_DAYS) };
+}
+
+const isWeekday = (iso: string) => {
+  const day = new Date(`${iso}T00:00:00Z`).getUTCDay();
+  return day !== 0 && day !== 6;
+};
 
 /**
  * Positions currently worth less than their pooled ACB, largest loss first.
- * A sale today is superficial if any purchase (any account) sits inside the 30-day window,
- * so we report the first date a sale would be safe and how long to avoid rebuying.
+ * A sale is superficial if any purchase (any account) settled inside its window, so each suggestion is
+ * the first trading day from today whose window starts after the last purchase, with that sale's
+ * window and the date before which not to rebuy.
  */
 export function findHarvestOpportunities(args: {
   positions: readonly AcbPosition[];
@@ -18,8 +31,6 @@ export function findHarvestOpportunities(args: {
   marginalRate?: Dec | null;
 }): HarvestOpportunity[] {
   const { positions, sorted, prices, asOfDate, fx, netGainYtdCad, inclusionRate, marginalRate } = args;
-  const windowStart = addDays(asOfDate, -30);
-  const windowEnd = addDays(asOfDate, 30);
   const offset = D.max(netGainYtdCad, ZERO);
 
   const lastAcquisition = new Map<string, string>();
@@ -38,7 +49,9 @@ export function findHarvestOpportunities(args: {
     if (!unrealizedLossCad.gt(0)) continue;
 
     const last = lastAcquisition.get(p.securityId);
-    const blocked = last !== undefined && last >= windowStart;
+    let saleDate = asOfDate;
+    while (!isWeekday(saleDate) || (last !== undefined && windowOf(saleDate).start <= last)) saleDate = addDays(saleDate, 1);
+    const { start: windowStart, end: windowEnd } = windowOf(saleDate);
     const usable = D.min(unrealizedLossCad, offset);
     out.push({
       securityId: p.securityId,
@@ -52,8 +65,8 @@ export function findHarvestOpportunities(args: {
         marginalRate === null || marginalRate === undefined ? null : usable.times(inclusionRate).times(marginalRate),
       windowStart,
       windowEnd,
-      blockedByRecentPurchase: blocked,
-      earliestSafeSaleDate: blocked && last !== undefined ? addDays(last, 31) : asOfDate,
+      blockedByRecentPurchase: last !== undefined && windowOf(asOfDate).start <= last,
+      earliestSafeSaleDate: saleDate,
       noRebuyBefore: addDays(windowEnd, 1),
     });
   }

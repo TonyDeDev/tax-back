@@ -13,7 +13,7 @@ const EMPTY: TaxYearView = {
   dividends: [],
   harvest: [],
   marginalRate: null,
-  returnView: { formYear: 2025, verified: true, lines: [], netCapitalLossCad: null, checks: [], t3Symbols: [], contributionForms: [], tfsa: null },
+  returnView: { formYear: 2025, verified: true, lines: [], netCapitalLossCad: null, capitalLossCad: null, checks: [], t3Symbols: [], contributionForms: [], tfsa: null },
 };
 
 describe("toCsv", () => {
@@ -130,6 +130,7 @@ describe("taxYearCsv", () => {
           verified: false,
           lines: [{ key: "t1-12700", form: "T1", line: "12700", label: "Taxable capital gains", amountCad: "114.81", note: null }],
           netCapitalLossCad: null,
+          capitalLossCad: null,
           checks: [{ key: "gap-x", text: "VFV: your brokers hold more units than the history explains, so its ACB may be wrong.", href: null, linkLabel: null }],
           t3Symbols: [],
           contributionForms: [],

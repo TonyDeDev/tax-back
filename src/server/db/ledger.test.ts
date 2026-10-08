@@ -238,6 +238,20 @@ describe("toCashFlows", () => {
     expect(cash).toMatchObject({ plan: "non_registered", investment: false });
   });
 
+  it("links a flow for shares moved in kind to the transfer of the same activity in the same account", () => {
+    const transactions = [
+      { id: "t1", accountId: "a1", snaptradeActivityId: "act1", kind: "transfer_in" as const },
+      { id: "t2", accountId: "a1", snaptradeActivityId: "act2", kind: "buy" as const },
+      { id: "t3", accountId: "other", snaptradeActivityId: "act3", kind: "transfer_in" as const },
+    ];
+    const flows = toCashFlows(
+      [flowRow({}), flowRow({ id: "f2", snaptradeActivityId: "act2" }), flowRow({ id: "f3", snaptradeActivityId: "act3" })],
+      accounts,
+      transactions,
+    );
+    expect(flows.map((f) => f.transferEntryId)).toEqual(["t1", null, null]);
+  });
+
   it("maps CRA figures, leaving blanks as null", () => {
     const [i] = toContributionInputs([
       {

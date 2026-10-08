@@ -95,9 +95,21 @@ export function toOpenings(
 /**
  * Registered plan cash flows for the engine. A synced flow takes its account's current type, so
  * confirming an account as a TFSA turns its deposits into TFSA contributions on the next recompute.
+ * A flow for shares moved in kind shares its SnapTrade activity with a transfer in the ledger, which
+ * links the two: the engine reads where the shares came from through that entry.
  */
-export function toCashFlows(rows: readonly ContributionFlowRow[], accounts: readonly FlowAccountRow[]): CashFlow[] {
+export function toCashFlows(
+  rows: readonly ContributionFlowRow[],
+  accounts: readonly FlowAccountRow[],
+  transactions: readonly Pick<TransactionRow, "id" | "accountId" | "snaptradeActivityId" | "kind">[] = [],
+): CashFlow[] {
   const byId = new Map(accounts.map((a) => [a.id, a]));
+  const transferKey = (accountId: string, activityId: string) => `${accountId}|${activityId}`;
+  const transfers = new Map(
+    transactions
+      .filter((t) => t.kind === "transfer_in" || t.kind === "transfer_out")
+      .map((t) => [transferKey(t.accountId, t.snaptradeActivityId), t.id]),
+  );
   return rows.map((r) => {
     const account = r.accountId === null ? null : lookup(byId, r.accountId, "account");
     const plan = account ? account.accountType : r.plan;
@@ -113,6 +125,8 @@ export function toCashFlows(rows: readonly ContributionFlowRow[], accounts: read
       currency: r.currency,
       brokerType: r.brokerType,
       classification: r.classification,
+      transferEntryId:
+        r.accountId !== null && r.snaptradeActivityId !== null ? (transfers.get(transferKey(r.accountId, r.snaptradeActivityId)) ?? null) : null,
     };
   });
 }

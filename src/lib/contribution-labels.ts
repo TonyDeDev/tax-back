@@ -25,7 +25,11 @@ export const BROKER_TYPE_LABELS: Record<string, string> = {
   WITHDRAWAL: "Withdrawal",
   INTERNAL_CASH_TRANSFER_IN: "Transfer in",
   INTERNAL_CASH_TRANSFER_OUT: "Transfer out",
-  TRANSFER: "Cash transfer",
+  TRANSFER: "Transfer",
+  INTERNAL_ASSET_TRANSFER_IN: "Shares transferred in",
+  INTERNAL_ASSET_TRANSFER_OUT: "Shares transferred out",
+  EXTERNAL_ASSET_TRANSFER_IN: "Shares transferred in",
+  EXTERNAL_ASSET_TRANSFER_OUT: "Shares transferred out",
 };
 
 export const ROOM_SOURCE_LABELS = {

@@ -706,13 +706,26 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
         }
         // The named types carry their direction; a plain TRANSFER only has the sign of its units.
         const out = a.type.endsWith("_TRANSFER_OUT") || (a.type === "TRANSFER" && signed.isNegative());
-        transactions.push({
-          ...base(p, security),
-          kind: out ? "transfer_out" : "transfer_in",
-          quantity: units,
-          price: dec(a.price).abs(),
-        });
+        const row = base(p, security);
+        const price = dec(a.price).abs();
+        transactions.push({ ...row, kind: out ? "transfer_out" : "transfer_in", quantity: units, price });
         hold(security.snaptradeSymbolId, out ? units.negated() : units);
+        // Into or out of a registered plan, shares count as a contribution or withdrawal at fair market
+        // value. The flow shares the activity id, which links it to this transfer; without a price there
+        // is no value to count, and the ledger warns about the transfer instead.
+        const value = units.times(price);
+        if (value.gt(0)) {
+          cashFlows.push({
+            snaptradeActivityId: a.id,
+            brokerType: a.type,
+            date: p.tradeDate,
+            direction: out ? "out" : "in",
+            amount: value,
+            currency: row.currency,
+            description: `${units.toFixed()} ${security.symbol} in kind`,
+            raw: p.raw,
+          });
+        }
         break;
       }
       default:

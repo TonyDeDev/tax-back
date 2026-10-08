@@ -5,7 +5,7 @@ import { yearOf } from "./dates";
 import { ZERO, type Dec } from "./decimal";
 import { summarizeYears } from "./gains";
 import { findHarvestOpportunities } from "./harvest";
-import { sortLedger, validateLedger } from "./ledger";
+import { pairTransfers, sortLedger, validateLedger } from "./ledger";
 import { dropSupersededEntries, openingEntries } from "./missing-history";
 import { reconcile } from "./reconcile";
 import type {
@@ -31,7 +31,7 @@ export interface ComputeTaxInput {
   /** What the brokers hold today. Without it no reconciliation is produced. */
   brokerPositions?: readonly BrokerPosition[];
   /** Registered plan cash flows and CRA figures. Without it no contribution results are produced. */
-  contributions?: Omit<ContributionsInput, "fx" | "asOfDate">;
+  contributions?: Omit<ContributionsInput, "fx" | "asOfDate" | "transfers">;
 }
 
 export function computeTax(input: ComputeTaxInput): TaxResult {
@@ -66,7 +66,8 @@ export function computeTax(input: ComputeTaxInput): TaxResult {
     : { rows: [], matched: 0, total: 0 };
 
   const contributions = input.contributions
-    ? computeContributions({ ...input.contributions, fx: input.fx, asOfDate: input.asOfDate })
+    ? // Shares moved in kind count at fair market value; the ledger's pairing says where they came from or went.
+      computeContributions({ ...input.contributions, fx: input.fx, asOfDate: input.asOfDate, transfers: pairTransfers(sorted) })
     : { flows: [], years: [] };
 
   return {

@@ -17,7 +17,7 @@ const OTHER_PLANS = ["resp", "rrif", "lira", "us_retirement"] as const;
  * (or a CRA figure) up to the year of `asOfDate`. Pure: the caller supplies FX rates and today's date.
  */
 export function computeContributions(input: ContributionsInput): ContributionsResult {
-  const classified = classifyFlows(input.flows, input.fx);
+  const classified = classifyFlows(input.flows, input.fx, input.transfers);
   const date = new Map(input.flows.map((f) => [f.id, f.date]));
   const dated = classified.map((c) => ({ ...c, date: date.get(c.flowId)! }));
   const lastYear = yearOf(input.asOfDate);

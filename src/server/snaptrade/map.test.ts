@@ -387,6 +387,20 @@ describe("mapActivities", () => {
     expect(skipped).toEqual({});
   });
 
+  it("records shares moved in kind as a flow at fair market value, sharing the transfer's activity id", () => {
+    const { transactions, cashFlows } = mapActivities([
+      activity({ id: "x1", type: "INTERNAL_ASSET_TRANSFER_IN", units: 20, price: 30.5, amount: 610 }),
+      activity({ id: "x2", type: "TRANSFER", units: -4, price: 30 }),
+      // No price, no value: the ledger warns about the transfer, and there is nothing to count.
+      activity({ id: "x3", type: "EXTERNAL_ASSET_TRANSFER_IN", units: 5, price: 0 }),
+    ]);
+    expect(transactions.map((t) => t.snaptradeActivityId)).toEqual(["x1", "x2", "x3"]);
+    expect(cashFlows.map((f) => [f.snaptradeActivityId, f.brokerType, f.direction, f.amount.toString(), f.description])).toEqual([
+      ["x1", "INTERNAL_ASSET_TRANSFER_IN", "in", "610", "20 XEQT in kind"],
+      ["x2", "TRANSFER", "out", "120", "4 XEQT in kind"],
+    ]);
+  });
+
   it("maps a return of capital, which lowers ACB instead of being income", () => {
     const { transactions } = mapActivities([
       activity({ type: "RETURN_OF_CAPITAL", amount: 8, units: 0, price: 0, settlement_date: null, trade_date: "2026-09-22T12:00:00Z" }),

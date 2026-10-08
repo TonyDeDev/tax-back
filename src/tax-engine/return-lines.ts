@@ -23,8 +23,13 @@ export interface ReturnLines {
   formYear: number;
   verified: boolean;
   lines: ReturnLine[];
-  /** The net capital loss to carry, when the year's gains are negative. */
+  /**
+   * The net capital loss to carry, when the year's gains are negative: the allowable part (the loss at
+   * the inclusion rate), which is what Form T1A and line 25300 work with.
+   */
   netCapitalLossCad: Dec | null;
+  /** The full capital loss behind `netCapitalLossCad`, before the inclusion rate. */
+  capitalLossCad: Dec | null;
 }
 
 export interface ReturnLinesInput {
@@ -72,7 +77,9 @@ export function returnLines({ year, gains, totals }: ReturnLinesInput): ReturnLi
   }
 
   const taxable = totals?.taxableCapitalGainCad ?? ZERO;
-  const netLoss = totals && totals.netCapitalGainCad.isNegative() ? totals.netCapitalGainCad.neg() : null;
+  const loss = totals && totals.netCapitalGainCad.isNegative();
+  const netLoss = loss ? taxable.neg() : null;
+  const capitalLoss = loss ? totals.netCapitalGainCad.neg() : null;
   lines.push({
     key: "t1-12700",
     form: "T1",
@@ -129,5 +136,5 @@ export function returnLines({ year, gains, totals }: ReturnLinesInput): ReturnLi
     lines.push(...optional.filter((l) => !l.amountCad.isZero()));
   }
 
-  return { year, formYear: config.formYear, verified: config.verified, lines, netCapitalLossCad: netLoss };
+  return { year, formYear: config.formYear, verified: config.verified, lines, netCapitalLossCad: netLoss, capitalLossCad: capitalLoss };
 }

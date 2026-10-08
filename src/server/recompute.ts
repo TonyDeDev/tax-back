@@ -151,7 +151,7 @@ export async function loadEngineInput(db: AnyDb, userId: string, today: string):
       marginalRate: profile?.marginalRate ? new D(profile.marginalRate) : null,
       brokerPositions,
       contributions: {
-        flows: toCashFlows(flows, accounts),
+        flows: toCashFlows(flows, accounts, transactions),
         inputs: toContributionInputs(contributionInputs),
         profile: {
           birthYear: profile?.birthYear ?? null,

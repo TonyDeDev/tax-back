@@ -74,6 +74,22 @@ beforeAll(async () => {
     tx({ snaptradeActivityId: "3", kind: "transfer_out", tradeDate: "2025-03-03", settlementDate: "2025-03-03", quantity: "40", price: "15" }),
     tx({ snaptradeActivityId: "4", accountId: ids.tfsa, kind: "transfer_in", tradeDate: "2025-03-04", settlementDate: "2025-03-04", quantity: "40", price: "15" }),
   ]);
+  // The sync writes a flow for each side of the move, sharing the transfer's activity id.
+  await db.insert(s.contributionFlows).values(
+    [
+      { accountId: ids.nonReg, snaptradeActivityId: "3", direction: "out" as const },
+      { accountId: ids.tfsa, snaptradeActivityId: "4", direction: "in" as const },
+    ].map((f) => ({
+      ...f,
+      userId: U,
+      source: "snaptrade" as const,
+      brokerType: f.direction === "in" ? "INTERNAL_ASSET_TRANSFER_IN" : "INTERNAL_ASSET_TRANSFER_OUT",
+      flowDate: "2025-03-03",
+      amount: "600",
+      currency: "CAD",
+      description: "40 XYZ in kind",
+    })),
+  );
   await db.insert(s.corporateActions).values({
     userId: U,
     kind: "merger",
@@ -117,6 +133,14 @@ describe("recompute", () => {
     expect(events.map((e) => [e.rule, e.fxRate])).toEqual([
       ["buy_cost_plus_commission", "1.0000000000"],
       ["transfer_to_registered_deemed_sale", "1.0000000000"],
+    ]);
+  });
+
+  it("counts the shares moved into the TFSA as a contribution at fair market value", async () => {
+    const results = await db.select().from(s.contributionFlowResults).where(eq(s.contributionFlowResults.userId, U));
+    expect(results.map((r) => [r.plan, r.kind, r.amountCad, r.needsReview]).sort()).toEqual([
+      [null, "ignored", "600.000000", false],
+      ["tfsa", "contribution", "600.000000", false],
     ]);
   });
 

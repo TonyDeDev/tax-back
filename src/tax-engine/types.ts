@@ -203,12 +203,14 @@ export interface HarvestOpportunity {
   /** Net realized gain so far this year that a loss could offset (never negative). */
   gainsAvailableToOffsetCad: Dec;
   estimatedTaxSavingsCad: Dec | null;
+  /** The superficial loss window of a sale on `earliestSafeSaleDate`, around its T+1 settlement. */
   windowStart: string;
   windowEnd: string;
   /** Selling today would be superficial because of a purchase inside the window. */
   blockedByRecentPurchase: boolean;
+  /** The first trading day, from today, a sale would not be superficial. */
   earliestSafeSaleDate: string;
-  /** Do not buy this security in ANY account (including TFSA/RRSP) before this date. */
+  /** After a sale on `earliestSafeSaleDate`, do not buy this security in ANY account (including TFSA/RRSP) before this date. */
   noRebuyBefore: string;
 }
 

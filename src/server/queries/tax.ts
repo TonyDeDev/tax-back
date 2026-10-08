@@ -147,6 +147,7 @@ export interface ReturnView {
   verified: boolean;
   lines: ReturnLineView[];
   netCapitalLossCad: string | null;
+  capitalLossCad: string | null;
   checks: ReadinessCheck[];
   /** Canadian ETFs that paid distributions into non-registered accounts: the T3 slip has the real split. */
   t3Symbols: string[];
@@ -456,6 +457,7 @@ async function getReturnView(
     verified: result.verified,
     lines: [...result.lines, ...contributions.lines].map((l) => ({ ...l, amountCad: l.amountCad.toFixed(2) })),
     netCapitalLossCad: result.netCapitalLossCad?.toFixed(2) ?? null,
+    capitalLossCad: result.capitalLossCad?.toFixed(2) ?? null,
     checks,
     t3Symbols: funds.map((f) => f.symbol),
     contributionForms: contributions.forms,

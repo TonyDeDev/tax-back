@@ -16,6 +16,7 @@ This is a concept demo and not tax advice.
 - Standalone account fees do not change ACB; they are carrying charges, not costs of a trade.
   Trade commissions arrive on the buy or sell itself.
 - Reinvested dividends (DRIPs) are purchases: their cost adds to ACB.
+  The distribution itself is income: brokers report it as a dividend, then the reinvestment (`REI`) as the purchase.
 - Stock dividends add units, and their reported value is both a taxable dividend and their cost.
   With no value reported they behave like a split.
 - Every change to the pool is stored as an audit step with the rule applied and the Bank of Canada
@@ -51,6 +52,7 @@ This is a concept demo and not tax advice.
 - A transfer across that boundary with no market value from the broker is flagged and not applied.
 - A transfer with no counterpart (the other account is not connected) is flagged. Units arriving that
   way have no cost, so reconciliation asks for an opening balance.
+- Into or out of a registered plan, the shares also count for contribution room at fair market value (see Contributions and Room).
 
 ## Corporate Actions
 
@@ -88,11 +90,23 @@ They apply to the security as a whole: the pool and every registered account hol
 - It shows the gain, the tax at the user's marginal rate, any purchase in the last 30 days that would
   make a loss superficial (TFSA and RRSP included), and the date before which not to rebuy.
 
+## Tax-Loss Harvesting
+
+- Every pooled position worth less than its ACB today is a suggestion, largest loss first.
+- The suggested sale is the first trading day from today whose superficial loss window starts after the last purchase in any account.
+- The window is measured around that sale's T+1 settlement, exactly as the engine would judge the real sale.
+  The "do not buy back before" date is the day after it ends.
+- The gains it could offset are this year's net realized gains so far.
+  The tax saving is that offset at the inclusion rate and the user's marginal rate.
+
 ## Capital Gains
 
 - Gain is proceeds minus ACB of the units sold minus fees.
 - The gain is reported in the year of the settlement date.
 - The inclusion rate is 50%.
+  The increase to two-thirds proposed for June 25, 2024 was deferred and then cancelled, so it applies to no year.
+- When the year's losses exceed its gains, line 12700 is zero.
+  The net capital loss to carry is the allowable part (the loss at the inclusion rate), as CRA defines it for Form T1A and line 25300.
 
 ## Superficial Loss
 
@@ -124,7 +138,7 @@ Line numbers were checked against CRA's published forms (5006-R and 5000-S3) for
 | --- | --- |
 | Schedule 3, 13199 | Proceeds of every disposition in the year |
 | Schedule 3, 13200 | Their total gain or loss, with superficial losses left out |
-| T1 12700 | Taxable capital gains; zero for a net loss, which is shown as a loss to carry instead |
+| T1 12700 | Taxable capital gains; zero for a net loss, which is shown as a net capital loss (the allowable part) to carry instead |
 | T1 12000 | Taxable amount of eligible and non-eligible dividends (grossed up) |
 | T1 12010 | The non-eligible part of line 12000 |
 | T1 12100 | Foreign dividends in CAD, before withholding |
@@ -148,6 +162,13 @@ Schedule line numbers live in `src/tax-engine/config/contribution-forms.ts`, che
 
 - A deposit into a registered investment account is a contribution and a withdrawal is a withdrawal.
   Non-registered and cash accounts never count.
+- Shares moved in kind count at their fair market value (units times the price the broker reports), as CRA counts a contribution in kind.
+  The sync writes a flow for each asset transfer that shares its SnapTrade activity with the ledger's `transfer_in` or `transfer_out`.
+  The engine reads it through the ledger's own pairing of the two sides, the same pairing that makes the move a deemed disposition:
+  - from a non-registered account it is a contribution, and to one a withdrawal;
+  - between two accounts of the same plan type it is a transfer;
+  - from an RRSP into an FHSA it is an RRSP-to-FHSA transfer;
+  - with no visible other side (another institution), or between two different plans, it is read by direction and flagged for review, since a transfer from another institution's plan of the same type is not a contribution.
 - An internal cash transfer is paired with its other side (same amount and currency, opposite direction, another account, within 3 days, closest first):
   - between two accounts of the same plan type it is a transfer, which counts for nothing;
   - from an RRSP into an FHSA it is an RRSP-to-FHSA transfer;
@@ -167,7 +188,8 @@ Schedule line numbers live in `src/tax-engine/config/contribution-forms.ts`, che
 - Room on January 1 = last year's room - last year's contributions + last year's withdrawals + this year's limit.
 - The estimate starts in 2009, the year the user turns 18, or the year they became a resident, whichever is latest; it is flagged when the tracked history starts after that.
 - A withdrawal never frees room in the same year.
-  The part of a withdrawal that removes an excess is not added back next year.
+  Every withdrawal comes back next January, as in CRA's own examples.
+  Internally the part of a withdrawal that removed an excess is not added back, but the excess it removed no longer eats into next year's room either, so the total matches CRA's formula.
 - An excess is taxed at 1% a month on each month's highest excess (Form RC243); months after today are not counted.
 
 ### RRSP (Schedule 7)
@@ -219,7 +241,7 @@ The Hub alerts on any plan over its room this year.
 | `SPLIT` | `split`, ratio = (units held + units added) / units held in that account |
 | `STOCK_DIVIDEND` | `stock_dividend`: the units, and the reported amount as their value |
 | `FEE` | `fee` |
-| `TRANSFER`, `EXTERNAL_ASSET_TRANSFER_IN/OUT` | `transfer_in` / `transfer_out` |
+| `TRANSFER`, `EXTERNAL_ASSET_TRANSFER_IN/OUT`, `INTERNAL_ASSET_TRANSFER_IN/OUT` with a security | `transfer_in` / `transfer_out`, plus a contribution flow at units times price |
 | `CONTRIBUTION`, `DEPOSIT`, `WITHDRAWAL`, `INTERNAL_CASH_TRANSFER_IN/OUT`, and a `TRANSFER` with no security | a contribution flow (`contribution_flows`), direction from the amount's sign |
 | Interest, options, adjustments | not stored; counted in the sync stats |
 
@@ -254,8 +276,31 @@ The Hub alerts on any plan over its room this year.
 - Options are skipped, so a position created by an exercise or assignment can look short; reconciliation shows the gap.
 - Corporate actions are entered by hand. If a broker also reports one as trades or transfers, it would be
   counted twice; reconciliation shows the mismatch.
-- A withdrawal in kind from a registered account is not treated as a purchase for superficial loss checks.
+- A transfer in kind is not treated as a purchase for superficial loss checks, in either direction.
+  Shares moved into a TFSA, or out of a registered account into a non-registered one, inside the window of a loss would not deny it.
+- A transfer in kind with no price from the broker adds nothing to contribution room; the ledger flags it as a transfer with no value.
+- A merger with cash is split by fair market value: the cash is a disposition of its share of the ACB, and the new shares roll over the rest.
+  Section 85.1 only covers shares exchanged for shares alone.
+  When every share is exchanged for a mix of cash and shares and no section 85 election is filed, the whole exchange is a taxable disposition; enter it as a sale and a purchase at fair market value instead.
+- A spinoff always splits the ACB by fair market value.
+  A foreign spinoff without a section 86.1 election is a taxable dividend in kind instead, which is not modelled.
+- Harvesting savings only count this year's gains, not the taxable capital gains of the past 3 years a net capital loss can be carried back to.
+- A stock dividend's value is taken as the dividend amount.
+  Under the Income Tax Act it is the increase in paid-up capital, which is usually but not always the same.
 - A transfer in from an account that is not connected adds no units to the pool until an opening balance is entered.
 - Brokers share limited history through SnapTrade (Wealthsimple: about one year). Positions bought before that have no ACB until the user enters an opening balance.
 - A denied loss is apportioned across in-window purchases without lot tracking, so which specific
   replacement shares carry it is an approximation. The total denied is unaffected.
+
+## Verified Against CRA
+
+Checked on 2026-10-08 by recomputing the demo's Tax Center for 2024 to 2026 by hand.
+
+- **Superficial loss:** the least-of formula (sold, bought in the window, held at its end), the 61-day window, and a loss lost for good when the replacement shares are in a TFSA.
+- **ACB and gains:** pooled average cost across brokerages, return of capital, deemed sales into a TFSA at fair market value, and USD trades at their own date's Bank of Canada rate.
+- **Dividends:** 38% and 15% gross-ups, 15.0198% and 9.0301% federal credits, foreign dividends on line 12100 before withholding, and the withholding on Form T2209.
+- **Schedule 3:** lines 13199 and 13200, and 2024's Period 1 and Period 2 split, which CRA kept after reverting to the 50% inclusion rate ([CRA update](https://www.canada.ca/en/revenue-agency/news/newsroom/tax-tips/tax-tips-2025/update-cra-administration-proposed-capital-gains-taxation-changes.html)).
+- **Net capital loss:** the allowable part, not the full loss ([line 25300](https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/about-your-tax-return/tax-return/completing-a-tax-return/deductions-credits-expenses/line-25300-net-capital-losses-other-years.html)).
+- **TFSA:** every withdrawal added back next year ([CRA's examples](https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/tax-free-savings-account/tax-payable-on-tfsas/examples-tax-payable-on-excess-tfsa-amount.html)), the monthly 1% tax on the highest excess, and contributions in kind at fair market value ([before you contribute](https://www.canada.ca/en/revenue-agency/services/tax/individuals/topics/tax-free-savings-account/contributing/before.html)).
+- **Schedule 7:** the first-60-days deadlines (February 29, 2024; March 3, 2025; March 2, 2026) and the estimated deduction limit.
+- **Schedule 15:** participation room, carryforward, RRSP-to-FHSA transfers, and the annual FHSA limit as CRA defines it (the contributions that fit the room, not $8,000).

@@ -419,8 +419,9 @@ export default async function ContributionsYear(props: PageProps<"/contributions
         <CardHeader>
           <CardTitle>Deposits and withdrawals</CardTitle>
           <CardDescription>
-            Cash in and out of your registered accounts that counts for {year}. TaxBack reads a deposit as a contribution and
-            a transfer between two accounts of the same type as neither; change any row it got wrong.
+            Cash and shares in and out of your registered accounts that count for {year}. TaxBack reads a deposit as a
+            contribution, shares moved in kind at their fair market value, and a transfer between two accounts of the same type
+            as neither; change any row it got wrong.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-6">

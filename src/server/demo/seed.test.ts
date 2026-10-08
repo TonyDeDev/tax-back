@@ -72,7 +72,8 @@ describe("demo seed", () => {
 
     // TFSA: CRA's $12,000 for 2024, then $9,000 on January 1, 2025. Withdrawn in April and put back in
     // August, the $3,000 is an excess until October, and an unpaired $500 transfer in November adds one
-    // to December: 3 x $30 + 2 x $5 = $100. 2026 opens at -500 + 3,000 back + 7,000 = $9,500.
+    // to December: 3 x $30 + 2 x $5 = $100. 2026 opens at -500 + 3,000 back + 7,000 = $9,500, less
+    // $2,500 in cash and the 20 XEQT moved in kind at $30.50 ($610): $6,390 left.
     expect(get("tfsa", 2024)).toMatchObject({ roomSource: "cra", openingRoomCad: "12000.000000", roomRemainingCad: "2000.000000" });
     expect(get("tfsa", 2025)).toMatchObject({
       roomSource: "estimate",
@@ -82,7 +83,12 @@ describe("demo seed", () => {
       penaltyCad: "100.000000",
       roomRemainingCad: "-500.000000",
     });
-    expect(get("tfsa", 2026)).toMatchObject({ openingRoomCad: "9500.000000", roomRemainingCad: "7000.000000", penaltyCad: "0.000000" });
+    expect(get("tfsa", 2026)).toMatchObject({
+      openingRoomCad: "9500.000000",
+      contributionsCad: "3110.000000",
+      roomRemainingCad: "6390.000000",
+      penaltyCad: "0.000000",
+    });
 
     // RRSP: 2025's limit is 2024's unused $9,000 + 18% of $88,000. February 2026's $4,000 counts for 2025.
     expect(get("rrsp", 2024)).toMatchObject({ roomSource: "cra", deductionCad: "3000.000000", unusedRoomCad: "9000.000000" });

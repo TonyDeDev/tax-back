@@ -1,6 +1,6 @@
 import { rrspScheduleYear } from "../config/contribution-limits";
 import { addDays, yearOf } from "../dates";
-import type { AccountType, FxLookup } from "../types";
+import type { AccountType, FxLookup, LedgerEntry } from "../types";
 import type { CashFlow, ClassifiedFlow, FlowKind, Plan } from "./types";
 
 /** Cash moved between two of the user's own accounts at one broker. */
@@ -51,7 +51,28 @@ function byDirection(flow: CashFlow): FlowKind {
   return flow.direction === "in" ? "contribution" : "withdrawal";
 }
 
-function readKind(flow: CashFlow, plan: Plan, other: CashFlow | undefined): { kind: FlowKind; needsReview: boolean } {
+/**
+ * A transfer whose other side TaxBack sees, in `otherPlan` (null outside any registered plan). Within one
+ * plan type it is a transfer; from a non-registered account an ordinary contribution or withdrawal;
+ * between two different plans the broker may have done a direct transfer the user should confirm.
+ */
+function readAgainst(flow: CashFlow, plan: Plan, otherPlan: Plan | null): { kind: FlowKind; needsReview: boolean } {
+  if (otherPlan === plan) return { kind: "transfer", needsReview: false };
+  if (plan === "fhsa" && otherPlan === "rrsp" && flow.direction === "in") return { kind: "rrsp_to_fhsa", needsReview: false };
+  if (plan === "rrsp" && otherPlan === "fhsa" && flow.direction === "out") return { kind: "transfer", needsReview: false };
+  return { kind: byDirection(flow), needsReview: otherPlan !== null };
+}
+
+/**
+ * `other` is the paired side of an internal cash transfer. `partner` is set only for shares moved in
+ * kind: the ledger entry on the other side, or null when TaxBack cannot see it.
+ */
+function readKind(
+  flow: CashFlow,
+  plan: Plan,
+  other: CashFlow | undefined,
+  partner: LedgerEntry | null | undefined,
+): { kind: FlowKind; needsReview: boolean } {
   switch (flow.classification) {
     case "contribution":
     case "withdrawal":
@@ -68,16 +89,15 @@ function readKind(flow: CashFlow, plan: Plan, other: CashFlow | undefined): { ki
       break;
   }
 
+  // Shares moved in kind: the ledger paired the two sides, and the other side's account says what it was.
+  if (partner !== undefined) {
+    if (partner === null) return { kind: byDirection(flow), needsReview: true };
+    return readAgainst(flow, plan, isPlan(partner.accountType) ? partner.accountType : null);
+  }
   const type = flow.brokerType;
   if (type !== null && INTERNAL_TRANSFER.test(type)) {
     if (!other) return { kind: byDirection(flow), needsReview: true };
-    const otherPlan = planOf(other);
-    if (otherPlan === plan) return { kind: "transfer", needsReview: false };
-    if (plan === "fhsa" && otherPlan === "rrsp" && flow.direction === "in") return { kind: "rrsp_to_fhsa", needsReview: false };
-    if (plan === "rrsp" && otherPlan === "fhsa" && flow.direction === "out") return { kind: "transfer", needsReview: false };
-    // From a non-registered account it is an ordinary contribution; between two different plans the
-    // broker may have done a direct transfer the user should confirm.
-    return { kind: byDirection(flow), needsReview: otherPlan !== null };
+    return readAgainst(flow, plan, planOf(other));
   }
   // A reversed deposit or a returned withdrawal: the reading by direction is a guess.
   const expected = type === "WITHDRAWAL" ? "out" : type === "CONTRIBUTION" || type === "DEPOSIT" ? "in" : flow.direction;
@@ -85,7 +105,11 @@ function readKind(flow: CashFlow, plan: Plan, other: CashFlow | undefined): { ki
 }
 
 /** Reads every flow as a contribution, withdrawal, or transfer, converted to CAD at the Bank of Canada rate for its date. */
-export function classifyFlows(flows: readonly CashFlow[], fx: FxLookup): ClassifiedFlow[] {
+export function classifyFlows(
+  flows: readonly CashFlow[],
+  fx: FxLookup,
+  transfers: ReadonlyMap<string, LedgerEntry> = new Map(),
+): ClassifiedFlow[] {
   const pairs = pairInternalTransfers(flows);
   return flows.map((flow) => {
     const plan = planOf(flow);
@@ -96,7 +120,8 @@ export function classifyFlows(flows: readonly CashFlow[], fx: FxLookup): Classif
       fxRate: flow.currency === "CAD" ? null : rate,
     };
     if (plan === null) return { ...base, plan, kind: "ignored", taxYear: yearOf(flow.date), needsReview: false };
-    const { kind, needsReview } = readKind(flow, plan, pairs.get(flow.id));
+    const partner = flow.transferEntryId ? (transfers.get(flow.transferEntryId) ?? null) : undefined;
+    const { kind, needsReview } = readKind(flow, plan, pairs.get(flow.id), partner);
     const taxYear = plan === "rrsp" && kind === "contribution" ? rrspScheduleYear(flow.date) : yearOf(flow.date);
     return { ...base, plan, kind, taxYear, needsReview };
   });

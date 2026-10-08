@@ -94,7 +94,7 @@ Every rule has Vitest tests from worked examples.
 - **Audit trail:** every ACB event records the rule applied and the FX rate used.
 - **Reconciliation:** the replayed ledger is compared with broker positions (pooled non-registered per security, each registered account on its own).
 - **Sale preview:** "what if I sell?" runs the same engine with one hypothetical sale today.
-- **Contributions:** deposits and withdrawals in registered accounts are contributions and withdrawals; same-plan transfers count for nothing, and the user can reclassify any flow.
+- **Contributions:** deposits and withdrawals in registered accounts are contributions and withdrawals, and shares moved in kind count at fair market value; same-plan transfers count for nothing, and the user can reclassify any flow.
   Room for TFSA, RRSP, and FHSA comes from a CRA figure the user enters, else an estimate, else is unknown (never guessed).
   RRSP contributions in the first 60 days count for the year before; the deduction feeds Schedule 7 and line 20800, the FHSA deduction Schedule 15 and line 20805.
   An excess is taxed at 1% a month.

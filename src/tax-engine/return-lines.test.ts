@@ -90,7 +90,9 @@ describe("returnLines", () => {
       totals: totals({ taxableCapitalGainCad: -200, netCapitalGainCad: -400 }),
     });
     expect(byLine(r.lines)["12700"]).toBe("0.00");
-    expect(r.netCapitalLossCad!.toFixed(2)).toBe("400.00");
+    // CRA's net capital loss is the allowable part, at the inclusion rate.
+    expect(r.netCapitalLossCad!.toFixed(2)).toBe("200.00");
+    expect(r.capitalLossCad!.toFixed(2)).toBe("400.00");
   });
 
   it("leaves out empty lines but always shows line 12700, even with no results", () => {

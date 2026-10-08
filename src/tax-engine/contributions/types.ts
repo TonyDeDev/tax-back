@@ -1,5 +1,5 @@
 import type { Dec } from "../decimal";
-import type { AccountType, FxLookup } from "../types";
+import type { AccountType, FxLookup, LedgerEntry } from "../types";
 
 /** Every registered plan type; contributions to a non-registered account mean nothing for room. */
 export type Plan = Exclude<AccountType, "non_registered">;
@@ -34,6 +34,11 @@ export interface CashFlow {
   /** The activity type SnapTrade reported (`CONTRIBUTION`, `INTERNAL_CASH_TRANSFER_IN`, ...); null for manual entries. */
   brokerType: string | null;
   classification: FlowClassification | null;
+  /**
+   * For shares moved in kind, the ledger entry (`transfer_in` or `transfer_out`) of the same activity.
+   * `amount` is then their fair market value, which is what CRA counts as contributed or withdrawn.
+   */
+  transferEntryId?: string | null;
 }
 
 /** The figures CRA gives the user for one plan and year, and estimate inputs when they have none. */
@@ -73,6 +78,8 @@ export interface ContributionsInput {
   plansHeld: readonly Plan[];
   /** Per room plan, the earliest date from which every account of that plan has full history; null when unknown. */
   historyFrom: Readonly<Partial<Record<RoomPlan, string | null>>>;
+  /** The ledger's pairing of in-kind transfers (each side's entry id -> the other side), from `pairTransfers`. */
+  transfers?: ReadonlyMap<string, LedgerEntry>;
 }
 
 export type FlowKind = "contribution" | "withdrawal" | "transfer" | "rrsp_to_fhsa" | "ignored";

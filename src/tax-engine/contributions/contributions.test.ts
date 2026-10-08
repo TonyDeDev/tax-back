@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { rrspDeadline, rrspScheduleYear, tfsaLimit } from "../config/contribution-limits";
 import { schedule15Config, schedule7Config } from "../config/contribution-forms";
 import { D, type Dec } from "../decimal";
-import { flatFx } from "../test-helpers";
+import { entry, flatFx } from "../test-helpers";
 import { classifyFlows } from "./classify";
 import { monthlyExcess } from "./excess";
 import { computeContributions, contributionLines } from "./index";
@@ -184,6 +184,41 @@ describe("classifyFlows", () => {
     );
     expect(out).toMatchObject({ kind: "transfer" });
     expect(inn).toMatchObject({ kind: "rrsp_to_fhsa" });
+  });
+
+  /*
+   * Shares moved in kind count at fair market value (CRA: a contribution in kind is the property's FMV).
+   * Where they came from is the ledger's pairing of the two transfer entries, the same pairing that makes
+   * the move into a registered account a deemed disposition.
+   */
+  it("reads shares moved in kind by the account on the other side of the transfer", () => {
+    const fromMargin = entry({ id: "out-margin", kind: "transfer_out", date: "2025-05-01", qty: 20, price: 30.5 });
+    const fromTfsa = entry({ id: "out-tfsa", kind: "transfer_out", date: "2025-06-01", qty: 5, price: 30, type: "tfsa", account: "tfsa-b" });
+    const fromRrsp = entry({ id: "out-rrsp", kind: "transfer_out", date: "2025-07-01", qty: 3, price: 30, type: "rrsp", account: "rrsp" });
+    const transfers = new Map([
+      ["in-1", fromMargin],
+      ["in-2", fromTfsa],
+      ["in-3", fromRrsp],
+    ]);
+    const inKind = (id: string, init: FlowInit) => ({ ...flow(init), transferEntryId: id });
+    const [contribution, sameTfsa, fhsa, unseen, nonReg] = classifyFlows(
+      [
+        inKind("in-1", { date: "2025-05-01", amount: 610, type: "INTERNAL_ASSET_TRANSFER_IN" }),
+        inKind("in-2", { date: "2025-06-01", amount: 150, type: "INTERNAL_ASSET_TRANSFER_IN" }),
+        inKind("in-3", { date: "2025-07-01", amount: 90, plan: "fhsa", type: "INTERNAL_ASSET_TRANSFER_IN" }),
+        // From an account TaxBack cannot see: another institution's TFSA would be a transfer, so ask.
+        inKind("in-4", { date: "2025-08-01", amount: 300, type: "EXTERNAL_ASSET_TRANSFER_IN" }),
+        inKind("out-margin", { date: "2025-05-01", amount: 610, plan: "non_registered", dir: "out", type: "INTERNAL_ASSET_TRANSFER_OUT" }),
+      ],
+      fx,
+      transfers,
+    );
+    expect(contribution).toMatchObject({ kind: "contribution", needsReview: false });
+    expect(contribution!.amountCad.toFixed(2)).toBe("610.00");
+    expect(sameTfsa).toMatchObject({ kind: "transfer", needsReview: false });
+    expect(fhsa).toMatchObject({ kind: "rrsp_to_fhsa", needsReview: false });
+    expect(unseen).toMatchObject({ kind: "contribution", needsReview: true });
+    expect(nonReg).toMatchObject({ kind: "ignored" });
   });
 
   it("lets the user's classification win", () => {

@@ -116,14 +116,30 @@ describe("harvesting", () => {
     expect(h.gainsAvailableToOffsetCad.toFixed(2)).toBe("800.00");
     expect(h.estimatedTaxSavingsCad!.toFixed(2)).toBe("100.00");
     expect(h.blockedByRecentPurchase).toBe(false);
+    // Sold Monday September 1, it settles September 2: the window is August 3 to October 2.
     expect(h.earliestSafeSaleDate).toBe("2025-09-01");
-    expect(h.noRebuyBefore).toBe("2025-10-02");
+    expect([h.windowStart, h.windowEnd]).toEqual(["2025-08-03", "2025-10-02"]);
+    expect(h.noRebuyBefore).toBe("2025-10-03");
   });
 
   it("flags a recent purchase and gives the first safe sale date", () => {
     const h = base("2025-08-20").harvest[0]!;
     expect(h.blockedByRecentPurchase).toBe(true);
-    expect(h.earliestSafeSaleDate).toBe("2025-09-20");
+    // The window has to start after the August 20 purchase: sold Friday September 19, it settles Monday
+    // September 22. Not rebuying is measured from that sale, not from today.
+    expect(h.earliestSafeSaleDate).toBe("2025-09-19");
+    expect([h.windowStart, h.windowEnd]).toEqual(["2025-08-23", "2025-10-22"]);
+    expect(h.noRebuyBefore).toBe("2025-10-23");
+  });
+
+  it("never suggests selling on a weekend", () => {
+    const h = computeTax({
+      ledger: [entry({ kind: "buy", date: "2025-01-02", qty: 100, price: 20, security: "LOSE" })],
+      fx: flatFx(),
+      asOfDate: "2025-09-06",
+      prices: { LOSE: { price: d(15), currency: "CAD" } },
+    }).harvest[0]!;
+    expect(h.earliestSafeSaleDate).toBe("2025-09-08");
   });
 
   it("skips positions without a price", () => {

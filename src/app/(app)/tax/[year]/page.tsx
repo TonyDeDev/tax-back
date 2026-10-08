@@ -24,6 +24,8 @@ export const metadata: Metadata = { title: "Tax Center" };
 
 function Summary({ view }: { view: TaxYearView }) {
   const t = view.totals;
+  // A negative taxable gain is CRA's net capital loss: nothing on line 12700, but a loss to carry.
+  const netLoss = view.returnView.netCapitalLossCad;
   return (
     <section aria-label="Year summary" className="grid grid-cols-2 gap-4 lg:grid-cols-4">
       <StatCard
@@ -31,11 +33,19 @@ function Summary({ view }: { view: TaxYearView }) {
         value={<Money value={t?.netCapitalGainCad ?? 0} signed />}
         hint={view.isCurrentYear ? "So far this year" : "Settled in this year"}
       />
-      <StatCard
-        label="Taxable capital gain"
-        value={<Money value={t?.taxableCapitalGainCad ?? 0} signed />}
-        hint={t ? `${formatPercent(t.inclusionRate, 0)} inclusion rate` : "50% inclusion rate"}
-      />
+      {t && netLoss ? (
+        <StatCard
+          label="Net capital loss"
+          value={<Money value={netLoss} />}
+          hint={`${formatPercent(t.inclusionRate, 0)} of the loss, to carry back or forward`}
+        />
+      ) : (
+        <StatCard
+          label="Taxable capital gain"
+          value={<Money value={t?.taxableCapitalGainCad ?? 0} signed />}
+          hint={t ? `${formatPercent(t.inclusionRate, 0)} inclusion rate` : "50% inclusion rate"}
+        />
+      )}
       <StatCard
         label="Dividends and income"
         value={<Money value={t?.totalIncomeCad ?? 0} />}
@@ -165,8 +175,9 @@ function FillOutReturn({ view }: { view: TaxYearView }) {
       {r.tfsa?.roomRemainingCad && <TfsaCheck tfsa={r.tfsa} year={view.year} />}
       {r.netCapitalLossCad && (
         <p className="text-body-sm text-muted-foreground">
-          You have a net capital loss of <Money value={r.netCapitalLossCad} /> for {view.year}. It does not go on line 12700: you can apply it against
-          taxable capital gains of the past 3 years (Form T1A) or carry it forward to future years (line 25300).
+          Your capital losses are more than your gains by <Money value={r.capitalLossCad ?? 0} />, so you have a net capital loss of{" "}
+          <Money value={r.netCapitalLossCad} /> for {view.year} (the allowable part, at the inclusion rate). It does not go on line 12700: you
+          can apply it against taxable capital gains of the past 3 years (Form T1A) or carry it forward to future years (line 25300).
         </p>
       )}
       <p className="text-caption text-muted-foreground">
@@ -560,7 +571,7 @@ function Harvesting({ view }: { view: TaxYearView }) {
               </>
             ) : (
               <>
-                Safe to sell today. The 30-day window would run{" "}
+                Safe to sell {h.earliestSafeSaleDate === h.asOfDate ? "today" : `from ${formatDate(h.earliestSafeSaleDate)}`}. The 30-day window would run{" "}
                 <span className="tabular-nums">
                   {formatDate(h.windowStart)} to {formatDate(h.windowEnd)}
                 </span>

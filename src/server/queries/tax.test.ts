@@ -9,7 +9,7 @@ import type { AnyDb } from "@/server/db/types";
 import { seedDemo } from "@/server/demo/seed";
 import { taxYearCsv } from "@/lib/tax-csv";
 import { D } from "@/tax-engine";
-import { addDays } from "@/tax-engine/dates";
+import { addDays, nextBusinessDay } from "@/tax-engine/dates";
 import { getTaxYear, getTaxYears, groupDividends, type TaxYearView } from "./tax";
 
 /*
@@ -161,8 +161,8 @@ describe("getTaxYear", () => {
     const bce = current.harvest.find((h) => h.symbol === "BCE")!;
     expect(bce).toMatchObject({ blockedByRecentPurchase: false, asOfDate: TODAY, earliestSafeSaleDate: TODAY });
     expect(Number(bce.unrealizedLossCad)).toBeGreaterThan(0);
-    // 30 days after a sale today, in any account.
-    expect(bce.noRebuyBefore).toBe(addDays(TODAY, 31));
+    // A sale today settles T+1; no buying back in any account until the 30 days after that are over.
+    expect(bce.noRebuyBefore).toBe(addDays(nextBusinessDay(TODAY), 31));
 
     for (const year of [2025, 2024]) {
       expect(views.get(year)!.isCurrentYear).toBe(false);

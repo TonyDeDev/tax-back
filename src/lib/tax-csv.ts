@@ -275,7 +275,7 @@ function returnSection(view: TaxYearView): Cell[][] {
       .map((f) => [`${f.form} line numbers are from the ${f.formYear} form; check them once CRA publishes the ${view.year} form.`]),
     ["Form", "Line", "What it is", "Amount (CAD)", "Note"],
     ...r.lines.map((l) => [l.form, l.line ?? "", l.label, l.amountCad, l.note ?? ""]),
-    ...(r.netCapitalLossCad ? [["", "", "Net capital loss to carry back or forward (not on line 12700)", r.netCapitalLossCad, ""]] : []),
+    ...(r.netCapitalLossCad ? [["", "", "Net capital loss to carry back or forward (not on line 12700)", r.netCapitalLossCad, r.capitalLossCad ? `The allowable part of a ${money(r.capitalLossCad)} capital loss.` : ""]] : []),
     ...(r.tfsa?.roomRemainingCad
       ? [
           [

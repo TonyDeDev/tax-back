@@ -13,11 +13,12 @@ import { addDays, nextBusinessDay } from "@/tax-engine/dates";
  * and USD, over three tax years. Every date is relative to today, so the open superficial loss window
  * and the harvesting suggestion are live whenever it is reset. It shows:
  *
- * - XEQT at two brokerages, pooled into one ACB, with DRIPs, return of capital, and a sale each year.
+ * - XEQT at two brokerages, pooled into one ACB, with DRIPs (income, then a purchase), return of capital,
+ *   and a sale each year.
  * - RY on the TSX at Questrade and on the NYSE at Schwab: one pool, USD trades at their own date's rate,
  *   and USD dividends from a Canadian company counted as eligible.
  * - SHOP sold at a loss and rebought in the TFSA within 30 days: superficial, and lost for good (pending).
- * - XEQT moved in kind into the TFSA: a deemed sale at fair market value.
+ * - XEQT moved in kind into the TFSA: a deemed sale at fair market value, and a TFSA contribution of it.
  * - AAPL in USD with 15% U.S. withholding, and a Roth IRA purchase that never counts as taxable.
  * - MSFT transferred in from a broker TaxBack cannot see, closed with an opening balance.
  * - BCE well below its ACB with no recent purchase: a tax-loss harvesting suggestion.
@@ -88,8 +89,11 @@ const LEDGER: SeedEntry[] = [
   { account: "qtMargin", security: "XEQT", kind: "dividend", daysAgo: 820, amount: "88.40", cls: "eligible" },
   { account: "qtMargin", security: "XEQT", kind: "dividend", daysAgo: 455, amount: "92.15", cls: "eligible" },
   { account: "qtMargin", security: "XEQT", kind: "roc", daysAgo: 455, amount: "6.40" },
+  // A DRIP is a distribution, which is income, then a purchase with it: brokers report both.
+  { account: "wsPersonal", security: "XEQT", kind: "dividend", daysAgo: 455, amount: "34.92", cls: "eligible" },
   { account: "wsPersonal", security: "XEQT", kind: "drip", daysAgo: 455, qty: "1.2", price: "29.10" },
   { account: "qtMargin", security: "XEQT", kind: "sell", daysAgo: 400, qty: "120", price: "31.05", fees: "4.95" },
+  { account: "wsPersonal", security: "XEQT", kind: "dividend", daysAgo: 90, amount: "40.77", cls: "eligible" },
   { account: "wsPersonal", security: "XEQT", kind: "drip", daysAgo: 90, qty: "1.35", price: "30.20" },
   { account: "qtTfsa", security: "XEQT", kind: "buy", daysAgo: 650, qty: "80", price: "27.00" },
   // Moved in kind into the TFSA: a deemed sale at fair market value.
@@ -240,11 +244,13 @@ function pricePath(key: SecurityKey): (daysAgo: number) => Dec {
   };
 }
 
-/** What an entry did to its account's cash, in the account's currency. DRIPs and transfers move no cash. */
+/** What an entry did to its account's cash, in the account's currency. Transfers move no cash. */
 function cashFlow(e: SeedEntry): Dec {
   const gross = new D(e.qty ?? 0).times(e.price ?? 0);
   switch (e.kind) {
     case "buy":
+    // Spends the distribution credited with it.
+    case "drip":
       return gross.plus(e.fees ?? 0).negated();
     case "sell":
       return gross.minus(e.fees ?? 0);
@@ -461,6 +467,29 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
               description: "Demo portfolio",
               raw: { demo: true },
             },
+      ),
+    );
+    // Shares moved in kind: SnapTrade reports them once, so a sync writes a flow for each transfer as
+    // well, sharing its activity id. Into the TFSA they are a contribution at fair market value.
+    await tx.insert(s.contributionFlows).values(
+      LEDGER.flatMap((e, i) =>
+        e.kind === "transfer_in" || e.kind === "transfer_out"
+          ? [
+              {
+                userId: DEMO_USER_ID,
+                source: "snaptrade" as const,
+                accountId: accountId(e.account),
+                snaptradeActivityId: `demo-${i + 1}`,
+                brokerType: e.kind === "transfer_in" ? "INTERNAL_ASSET_TRANSFER_IN" : "INTERNAL_ASSET_TRANSFER_OUT",
+                flowDate: tradeDay(today, e.daysAgo),
+                direction: e.kind === "transfer_in" ? ("in" as const) : ("out" as const),
+                amount: new D(e.qty!).times(e.price!).toFixed(6),
+                currency: SECURITIES[e.security].currency,
+                description: `${e.qty} ${SECURITIES[e.security].symbol} in kind`,
+                raw: { demo: true },
+              },
+            ]
+          : [],
       ),
     );
     await tx.delete(s.contributionInputs).where(eq(s.contributionInputs.userId, DEMO_USER_ID));
