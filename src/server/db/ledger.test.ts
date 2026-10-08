@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { D } from "@/tax-engine";
-import { fxLookupFrom, toCorporateActions, toDerivedRows, toLedger } from "./ledger";
+import { fxLookupFrom, toCashFlows, toContributionInputs, toCorporateActions, toDerivedRows, toLedger } from "./ledger";
 import type * as s from "./schema";
 
 type TransactionRow = typeof s.transactions.$inferSelect;
@@ -86,6 +86,7 @@ describe("toDerivedRows", () => {
     warnings: [],
     acbEvents: [],
     reconciliation: { rows: [], matched: 0, total: 0 },
+    contributions: { flows: [], years: [] },
   };
 
   it("points opening ACB events at the manual adjustment and numbers events per security", () => {
@@ -188,5 +189,70 @@ describe("toCorporateActions", () => {
     expect(e).toMatchObject({ id: "corporate:ca1", kind: "merger", securityId: "old", accountType: "non_registered", tradeDate: "2025-03-01" });
     expect(e!.target).toEqual({ securityId: "new", symbol: "NEW", currency: "USD" });
     expect([e!.splitRatio!.toString(), e!.amount.toString(), e!.targetPrice!.toString(), e!.price.toString()]).toEqual(["0.5", "3", "40", "0"]);
+  });
+});
+
+type FlowRow = typeof s.contributionFlows.$inferSelect;
+
+const flowRow = (over: Partial<FlowRow>): FlowRow => ({
+  id: "f1",
+  userId: "u1",
+  source: "snaptrade",
+  accountId: "a1",
+  plan: null,
+  snaptradeActivityId: "act1",
+  brokerType: "CONTRIBUTION",
+  flowDate: "2025-02-03",
+  direction: "in",
+  amount: "1000.000000",
+  currency: "CAD",
+  description: null,
+  classification: null,
+  raw: {},
+  createdAt: new Date(0),
+  updatedAt: new Date(0),
+  ...over,
+});
+
+describe("toCashFlows", () => {
+  const accounts = [
+    { id: "a1", accountType: "tfsa" as const, kind: "investment" as const },
+    { id: "cash", accountType: "non_registered" as const, kind: "cash" as const },
+  ];
+
+  it("takes a synced flow's plan from its account's current type", () => {
+    const [f] = toCashFlows([flowRow({})], accounts);
+    expect(f).toMatchObject({ id: "f1", accountId: "a1", plan: "tfsa", investment: true, direction: "in", brokerType: "CONTRIBUTION" });
+    expect(f!.amount.toString()).toBe("1000");
+  });
+
+  it("keeps a manual flow's own plan, and marks cash accounts", () => {
+    const [manual, cash] = toCashFlows(
+      [
+        flowRow({ id: "m1", source: "manual", accountId: null, snaptradeActivityId: null, plan: "rrsp", brokerType: null, classification: "contribution" }),
+        flowRow({ id: "c1", accountId: "cash" }),
+      ],
+      accounts,
+    );
+    expect(manual).toMatchObject({ plan: "rrsp", accountId: null, investment: true, classification: "contribution" });
+    expect(cash).toMatchObject({ plan: "non_registered", investment: false });
+  });
+
+  it("maps CRA figures, leaving blanks as null", () => {
+    const [i] = toContributionInputs([
+      {
+        userId: "u1",
+        plan: "rrsp",
+        taxYear: 2025,
+        officialRoomCad: "12000.000000",
+        unusedCarriedForwardCad: null,
+        earnedIncomePriorYearCad: null,
+        pensionAdjustmentCad: null,
+        deductionClaimedCad: "500.000000",
+        updatedAt: new Date(0),
+      },
+    ]);
+    expect(i).toMatchObject({ plan: "rrsp", year: 2025, unusedCarriedForward: null });
+    expect([i!.officialRoom!.toString(), i!.deductionClaimed!.toString()]).toEqual(["12000", "500"]);
   });
 });

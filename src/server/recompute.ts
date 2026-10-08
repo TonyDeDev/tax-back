@@ -1,12 +1,20 @@
 import "server-only";
 import { eq, inArray } from "drizzle-orm";
 import { replaceDerived } from "@/server/db/derived";
-import { fxLookupFrom, toCorporateActions, toDerivedRows, toLedger, toOpenings } from "@/server/db/ledger";
+import {
+  fxLookupFrom,
+  toCashFlows,
+  toContributionInputs,
+  toCorporateActions,
+  toDerivedRows,
+  toLedger,
+  toOpenings,
+} from "@/server/db/ledger";
 import { loadUserPools } from "@/server/db/pools";
 import * as s from "@/server/db/schema";
 import type { AnyDb } from "@/server/db/types";
 import { torontoDate } from "@/server/snaptrade/map";
-import { type ComputeTaxInput, computeTax, D, type MarketPrice } from "@/tax-engine";
+import { type ComputeTaxInput, computeTax, D, isRegistered, type MarketPrice, type Plan, type RoomPlan } from "@/tax-engine";
 
 export interface EngineInput {
   input: ComputeTaxInput;
@@ -24,10 +32,15 @@ export interface EngineInput {
  * trade is still converted at its own date's rate.
  */
 export async function loadEngineInput(db: AnyDb, userId: string, today: string): Promise<EngineInput> {
-  const [transactions, accounts, openings, corporate, holdings, [profile], { pools, listings }] = await Promise.all([
+  const [transactions, accounts, openings, corporate, holdings, [profile], { pools, listings }, flows, contributionInputs] = await Promise.all([
     db.select().from(s.transactions).where(eq(s.transactions.userId, userId)),
     db
-      .select({ id: s.brokerageAccounts.id, accountType: s.brokerageAccounts.accountType, kind: s.brokerageAccounts.kind })
+      .select({
+        id: s.brokerageAccounts.id,
+        accountType: s.brokerageAccounts.accountType,
+        kind: s.brokerageAccounts.kind,
+        historyCompleteFrom: s.brokerageAccounts.historyCompleteFrom,
+      })
       .from(s.brokerageAccounts)
       .where(eq(s.brokerageAccounts.userId, userId)),
     db.select().from(s.manualAdjustments).where(eq(s.manualAdjustments.userId, userId)),
@@ -42,12 +55,27 @@ export async function loadEngineInput(db: AnyDb, userId: string, today: string):
       })
       .from(s.holdings)
       .where(eq(s.holdings.userId, userId)),
-    db.select({ marginalRate: s.userProfiles.marginalRate }).from(s.userProfiles).where(eq(s.userProfiles.userId, userId)),
+    db
+      .select({
+        marginalRate: s.userProfiles.marginalRate,
+        birthYear: s.userProfiles.birthYear,
+        residentSinceYear: s.userProfiles.residentSinceYear,
+        fhsaOpenedYear: s.userProfiles.fhsaOpenedYear,
+      })
+      .from(s.userProfiles)
+      .where(eq(s.userProfiles.userId, userId)),
     loadUserPools(db, userId),
+    db.select().from(s.contributionFlows).where(eq(s.contributionFlows.userId, userId)),
+    db.select().from(s.contributionInputs).where(eq(s.contributionInputs.userId, userId)),
   ]);
 
   const currencies = [
-    ...new Set([...transactions.map((t) => t.currency), ...corporate.map((c) => c.currency), ...holdings.map((h) => h.currency)]),
+    ...new Set([
+      ...transactions.map((t) => t.currency),
+      ...corporate.map((c) => c.currency),
+      ...holdings.map((h) => h.currency),
+      ...flows.map((f) => f.currency),
+    ]),
   ].filter((c) => c !== "CAD");
   const fxRows =
     currencies.length === 0
@@ -103,6 +131,16 @@ export async function loadEngineInput(db: AnyDb, userId: string, today: string):
     ];
   });
 
+  // Registered investment accounts the user holds, and per room plan the date from which all of them have history.
+  const planAccounts = accounts.filter((a) => a.kind === "investment" && isRegistered(a.accountType));
+  const plansHeld = [...new Set(planAccounts.map((a) => a.accountType as Plan))];
+  const historyFrom: Partial<Record<RoomPlan, string | null>> = {};
+  for (const plan of ["tfsa", "rrsp", "fhsa"] as const) {
+    const dates = planAccounts.filter((a) => a.accountType === plan).map((a) => a.historyCompleteFrom);
+    if (dates.length === 0) continue;
+    historyFrom[plan] = dates.some((d) => d === null) ? null : dates.reduce((a, b) => (a! > b! ? a : b));
+  }
+
   return {
     input: {
       ledger: [...toLedger(pooledTransactions, accounts, listings), ...toCorporateActions(pooledCorporate, listings)],
@@ -112,6 +150,17 @@ export async function loadEngineInput(db: AnyDb, userId: string, today: string):
       prices,
       marginalRate: profile?.marginalRate ? new D(profile.marginalRate) : null,
       brokerPositions,
+      contributions: {
+        flows: toCashFlows(flows, accounts),
+        inputs: toContributionInputs(contributionInputs),
+        profile: {
+          birthYear: profile?.birthYear ?? null,
+          residentSinceYear: profile?.residentSinceYear ?? null,
+          fhsaOpenedYear: profile?.fhsaOpenedYear ?? null,
+        },
+        plansHeld,
+        historyFrom,
+      },
     },
     openingIds: new Map(pooledOpenings.map((o) => [o.securityId, o.id])),
   };

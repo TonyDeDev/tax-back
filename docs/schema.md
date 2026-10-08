@@ -23,13 +23,14 @@ Migrations are generated into `drizzle/` with `pnpm db:generate` and applied wit
 | Group | Tables |
 | --- | --- |
 | Auth (Better Auth) | `users`, `sessions`, `accounts` (Google and SnapTrade OAuth grants, tokens encrypted), `verifications`, `rate_limits` |
-| Profile | `user_profiles` (demo flag, marginal rate, last sync) |
+| Profile | `user_profiles` (demo flag, marginal rate, birth year, residency, first FHSA year, last sync) |
 | Brokerage data | `connections`, `brokerage_accounts`, `securities` (global), `transactions`, `holdings`, `account_balances` |
-| User input | `manual_adjustments` (opening quantity and ACB), `corporate_actions` (spinoffs and mergers), `security_preferences` (listing links and dividend class) |
+| User input | `manual_adjustments` (opening quantity and ACB), `corporate_actions` (spinoffs and mergers), `security_preferences` (listing links and dividend class), `contribution_inputs` (CRA room figures, estimate inputs, deduction claimed) |
+| Registered plan cash | `contribution_flows` (synced deposits, withdrawals, and transfers, plus manual entries, with the user's classification) |
 | Reference | `fx_rates` (Bank of Canada, global) |
 | Value history | `account_value_snapshots` (each account's CAD value per sync day), `security_price_snapshots` (CAD price per held security per sync day, per user so demo prices never reach real users) |
 | Operational | `sync_runs` |
-| Derived | `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `superficial_loss_replacements`, `income_events`, `harvest_opportunities`, `tax_year_summaries`, `tax_warnings`, `position_reconciliations` |
+| Derived | `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `superficial_loss_replacements`, `income_events`, `harvest_opportunities`, `tax_year_summaries`, `tax_warnings`, `position_reconciliations`, `contribution_flow_results`, `contribution_summaries` |
 
 ```mermaid
 erDiagram
@@ -55,6 +56,10 @@ erDiagram
   users ||--o{ harvest_opportunities : derived
   users ||--o{ tax_year_summaries : derived
   users ||--o{ tax_warnings : derived
+  brokerage_accounts ||--o{ contribution_flows : "cash in and out"
+  users ||--o{ contribution_inputs : enters
+  contribution_flows ||--|| contribution_flow_results : "read as"
+  users ||--o{ contribution_summaries : derived
 ```
 
 ## Design Decisions
@@ -148,13 +153,13 @@ These hold for code not yet written; each is a way the schema alone cannot stop 
 15. Export any Tax Center table as CSV.
 16. Convert foreign currency at the Bank of Canada rate with a previous-business-day fallback.
 17. Delete all of a user's data with one statement, and reset the demo daily.
+18. Track contributions and withdrawals for every registered plan, room for TFSA, RRSP, and FHSA from CRA's figures or an estimate, and the Schedule 7 and Schedule 15 amounts.
 
 ### Later
 
 - CSV import from brokerage exports: add `connections.source` and an `import_batches` table, and make the SnapTrade ids nullable per source.
 - PDF tax report: reads the same derived tables with no schema change.
 - Net capital loss carryforward: `tax_year_summaries` already stores a signed taxable gain per year; add the applied carryforward and a user-entered prior balance.
-- TFSA, RRSP, and FHSA contribution room: add a `contribution_room` table and derive contributions from registered-account deposits.
 - Provincial tax estimate: add `user_profiles.province` and a per-year provincial rate config.
 - Broker versus TaxBack ACB reconciliation: `holdings.broker_book_value` already joins to `acb_positions`.
 - Transaction overrides, such as reclassifying a dividend: add a `transaction_overrides` table that recompute applies.

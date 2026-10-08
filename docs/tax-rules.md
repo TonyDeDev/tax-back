@@ -135,7 +135,76 @@ Line numbers were checked against CRA's published forms (5006-R and 5000-S3) for
 - A year CRA has not published forms for yet uses the latest verified year's numbers and says so.
 - Readiness checks listed above the lines: tax gaps, sales larger than the known position, unconfirmed account types, superficial loss windows still open, and unverified rates.
 - Canadian ETFs that paid distributions into non-registered accounts are named with a pointer to their T3 slips, which hold the real split.
-- Not covered: interest income, line 22100 carrying charges, line 25300 losses of other years, capital gains from T3 and T5 slips (lines 17400 and 17600), RRSP and FHSA deductions, Form T1135, and provincial forms.
+- Schedule 7 and Schedule 15 lines, and T1 lines 20800 and 20805, come from the contribution results (see Contributions and Room).
+- Not covered: interest income, line 22100 carrying charges, line 25300 losses of other years, capital gains from T3 and T5 slips (lines 17400 and 17600), Home Buyers' Plan and Lifelong Learning Plan repayments, Form T1135, and provincial forms.
+
+## Contributions and Room
+
+`src/tax-engine/contributions/` tracks cash into and out of every registered plan, room for TFSA, RRSP, and FHSA, and the Schedule 7 and Schedule 15 amounts.
+Limits live in `src/tax-engine/config/contribution-limits.ts`, checked against CRA's limits table on 2026-10-08.
+Schedule line numbers live in `src/tax-engine/config/contribution-forms.ts`, checked against the e-text of 5000-S7 (2019 to 2025) and 5000-S15 (2023 to 2025).
+
+### Reading the cash flows
+
+- A deposit into a registered investment account is a contribution and a withdrawal is a withdrawal.
+  Non-registered and cash accounts never count.
+- An internal cash transfer is paired with its other side (same amount and currency, opposite direction, another account, within 3 days, closest first):
+  - between two accounts of the same plan type it is a transfer, which counts for nothing;
+  - from an RRSP into an FHSA it is an RRSP-to-FHSA transfer;
+  - from a non-registered account it is a contribution, and to one a withdrawal;
+  - unpaired, or between two different plans, it is read by direction and flagged for review.
+- The user can reclassify any synced flow (contribution, withdrawal, same-plan transfer, RRSP to FHSA, not a contribution) and add flows for accounts TaxBack cannot see; a sync never overwrites the choice.
+- Amounts are converted to CAD at the Bank of Canada rate for the flow's date.
+
+### Room source
+
+- A figure the user enters from CRA (TFSA room on January 1, the RRSP deduction limit, FHSA participation room) always wins and restarts the chain from that year.
+- Otherwise TaxBack estimates from the year before; with nothing to build on the room is unknown rather than guessed.
+
+### TFSA
+
+- Annual limits: $5,000 (2009 to 2012), $5,500 (2013, 2014), $10,000 (2015), $5,500 (2016 to 2018), $6,000 (2019 to 2022), $6,500 (2023), $7,000 (2024 to 2026).
+- Room on January 1 = last year's room - last year's contributions + last year's withdrawals + this year's limit.
+- The estimate starts in 2009, the year the user turns 18, or the year they became a resident, whichever is latest; it is flagged when the tracked history starts after that.
+- A withdrawal never frees room in the same year.
+  The part of a withdrawal that removes an excess is not added back next year.
+- An excess is taxed at 1% a month on each month's highest excess (Form RC243); months after today are not counted.
+
+### RRSP (Schedule 7)
+
+- A contribution counts for the year whose deadline it beats: the 60th day of the next year, moved to Monday when it falls on a weekend (February 29, 2024; March 3, 2025; March 2, 2026).
+- Line 1: unused contributions from earlier years (the user's figure, else TaxBack's carry forward).
+  Line 2: contributions from the day after last year's deadline to December 31.
+  Line 3: contributions from January 1 to the deadline.
+  Line 4 (24500): lines 2 + 3.
+  Line 11: the deduction limit.
+  Line 20 (17 before 2021) and T1 20800: the deduction.
+  Line 23 (18 before 2021): unused contributions to carry forward.
+- Estimated limit = last year's limit - last year's deduction + min(18% of last year's earned income, the dollar limit) - last year's pension adjustment.
+  Dollar limits: $26,500 (2019) to $33,810 (2026) and $35,390 (2027).
+- The deduction is the most allowed (whichever is less of the limit and the contributions available) unless the user claims less; the rest carries forward.
+- Undeducted contributions above the limit plus $2,000 are an excess taxed at 1% a month (Form T1-OVP).
+  Contributions in the first 60 days count from January 1, which can overstate January and February slightly.
+- Withdrawals are listed but their income (T4RSP) is not computed.
+
+### FHSA (Schedule 15)
+
+- Room starts the year the first FHSA was opened (the user's year, else the first FHSA flow; never before 2023).
+- Participation room = $8,000 + last year's unused room (at most $8,000), within $40,000 for life of annual limits plus RRSP transfers.
+- RRSP-to-FHSA transfers use room first and are not deductible.
+  The annual FHSA limit is the contributions that fit in the room left, plus last year's excess.
+- Most that can be deducted = whichever is less of (annual limits to date - past deductions) and ($40,000 - past deductions - RRSP transfers to date).
+  The user can claim less; unused contributions carry forward.
+- Contributions above the room are an excess taxed at 1% a month and carry into next year's limit.
+  A withdrawal is read as a designated withdrawal of the excess.
+- Lines shown follow each year's form: contributions (line 1, 68935), carryforward, RRSP transfers (68950), annual limit, maximum deduction, unused contributions, the deduction (T1 20805), and the carry forward; the first year notes box 68930.
+
+### Other plans
+
+RESP, RRIF, LIRA, and U.S. retirement accounts list contributions and withdrawals per year; their room is not tracked.
+
+The Tax Center shows the TFSA room check (no form) and asks the user to review unpaired transfers and to enter an unknown RRSP limit.
+The Hub alerts on any plan over its room this year.
 
 ## From SnapTrade to the Ledger
 
@@ -151,7 +220,8 @@ Line numbers were checked against CRA's published forms (5006-R and 5000-S3) for
 | `STOCK_DIVIDEND` | `stock_dividend`: the units, and the reported amount as their value |
 | `FEE` | `fee` |
 | `TRANSFER`, `EXTERNAL_ASSET_TRANSFER_IN/OUT` | `transfer_in` / `transfer_out` |
-| Deposits, withdrawals, interest, options, adjustments | not stored; counted in the sync stats |
+| `CONTRIBUTION`, `DEPOSIT`, `WITHDRAWAL`, `INTERNAL_CASH_TRANSFER_IN/OUT`, and a `TRANSFER` with no security | a contribution flow (`contribution_flows`), direction from the amount's sign |
+| Interest, options, adjustments | not stored; counted in the sync stats |
 
 - Dates are the Toronto calendar day of SnapTrade's UTC timestamp, so an evening trade on December 31 stays in that year.
 - A trade that settles in a different currency from the listing (a US stock bought with CAD) uses the cash actually paid or received, from the activity amount.
@@ -168,6 +238,8 @@ Line numbers were checked against CRA's published forms (5006-R and 5000-S3) for
 - Mapping has only been run against a real Wealthsimple connection; activity types a U.S. broker reports
   that the mapper does not know are skipped and counted, and reconciliation shows any resulting gap.
 - Provincial credits are not modelled.
+- Contributions: spousal RRSP attribution, Home Buyers' Plan and Lifelong Learning Plan withdrawals and repayments, FHSA qualifying withdrawals and the 15-year closing rule, past-service pension adjustments, PRPP and SPP contributions outside a connected account (enter them by hand), RRSP withdrawal income, and RESP grants are not modelled.
+  A direct transfer between institutions that a broker reports as a deposit is read as a contribution until the user reclassifies it.
 - Rates are verified for 2019 to 2026 only, and other years raise a warning.
 - Quantities are pooled, not tracked per account, so a split is recognised by matching security,
   ratio, and a settlement date within 7 days. Two brokers reporting one split more than 7 days apart

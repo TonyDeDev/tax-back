@@ -13,7 +13,7 @@ const EMPTY: TaxYearView = {
   dividends: [],
   harvest: [],
   marginalRate: null,
-  returnView: { formYear: 2025, verified: true, lines: [], netCapitalLossCad: null, checks: [], t3Symbols: [] },
+  returnView: { formYear: 2025, verified: true, lines: [], netCapitalLossCad: null, checks: [], t3Symbols: [], contributionForms: [], tfsa: null },
 };
 
 describe("toCsv", () => {
@@ -126,6 +126,8 @@ describe("taxYearCsv", () => {
           netCapitalLossCad: null,
           checks: [{ key: "gap-x", text: "VFV: your brokers hold more units than the history explains, so its ACB may be wrong.", href: null, linkLabel: null }],
           t3Symbols: [],
+          contributionForms: [],
+          tfsa: null,
         },
       },
       "2026-10-07",
@@ -135,6 +137,25 @@ describe("taxYearCsv", () => {
     // The check holds a comma, so its cell is quoted.
     expect(csv).toContain('Check first\r\n"VFV: your brokers hold more units than the history explains, so its ACB may be wrong."\r\n');
     expect(csv.indexOf("\r\nFor your return\r\n")).toBeLessThan(csv.indexOf("\r\nSummary\r\n"));
+  });
+
+  it("lists the Schedule 7 lines, flags an unpublished schedule, and adds the TFSA room check", () => {
+    const csv = taxYearCsv(
+      {
+        ...EMPTY,
+        year: 2026,
+        returnView: {
+          ...EMPTY.returnView,
+          lines: [{ key: "t1-20800", form: "T1", line: "20800", label: "RRSP deduction", amountCad: "4500.00", note: "From Schedule 7." }],
+          contributionForms: [{ form: "Schedule 7", formYear: 2025, verified: false }],
+          tfsa: { roomSource: "estimate", roomRemainingCad: "-500.000000", peakExcessCad: "500.000000", penaltyCad: "10.000000", estimateIncomplete: false },
+        },
+      },
+      "2026-10-07",
+    );
+    expect(csv).toContain("Schedule 7 line numbers are from the 2025 form; check them once CRA publishes the 2026 form.\r\n");
+    expect(csv).toContain("T1,20800,RRSP deduction,4500.00,From Schedule 7.\r\n");
+    expect(csv).toContain("TFSA,,TFSA room left (no form to file),-500.00,Over the limit: estimated tax of 10.00 at 1% a month (Form RC243).\r\n");
   });
 });
 

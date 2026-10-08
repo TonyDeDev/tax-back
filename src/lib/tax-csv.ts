@@ -257,9 +257,27 @@ function returnSection(view: TaxYearView): Cell[][] {
   return [
     ["For your return"],
     ...(r.verified ? [] : [[`Line numbers are from the ${r.formYear} forms; check them once CRA publishes the ${view.year} forms.`]]),
+    ...r.contributionForms
+      .filter((f) => !f.verified)
+      .map((f) => [`${f.form} line numbers are from the ${f.formYear} form; check them once CRA publishes the ${view.year} form.`]),
     ["Form", "Line", "What it is", "Amount (CAD)", "Note"],
     ...r.lines.map((l) => [l.form, l.line ?? "", l.label, l.amountCad, l.note ?? ""]),
     ...(r.netCapitalLossCad ? [["", "", "Net capital loss to carry back or forward (not on line 12700)", r.netCapitalLossCad, ""]] : []),
+    ...(r.tfsa?.roomRemainingCad
+      ? [
+          [
+            "TFSA",
+            "",
+            "TFSA room left (no form to file)",
+            money(r.tfsa.roomRemainingCad),
+            new D(r.tfsa.penaltyCad).isZero()
+              ? r.tfsa.roomSource === "cra"
+                ? "From the room you entered."
+                : "Estimated by TaxBack."
+              : `Over the limit: estimated tax of ${money(r.tfsa.penaltyCad)} at 1% a month (Form RC243).`,
+          ],
+        ]
+      : []),
     ...(r.checks.length > 0 ? [[], ["Check first"], ...r.checks.map((c) => [c.text])] : []),
   ];
 }

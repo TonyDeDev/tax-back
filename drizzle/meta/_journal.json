@@ -64,6 +64,13 @@
       "when": 1791428028668,
       "tag": "0008_reported_account_total",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1791432492972,
+      "tag": "0009_contributions",
+      "breakpoints": true
     }
   ]
 }

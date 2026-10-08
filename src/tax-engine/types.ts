@@ -1,3 +1,4 @@
+import type { ContributionsResult } from "./contributions/types";
 import type { Dec } from "./decimal";
 
 /**
@@ -297,4 +298,5 @@ export interface TaxResult {
   harvest: HarvestOpportunity[];
   years: YearSummary[];
   warnings: Warning[];
+  contributions: ContributionsResult;
 }

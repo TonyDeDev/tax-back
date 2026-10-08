@@ -3,6 +3,7 @@
 import { and, eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { decimal, isoDate, positive } from "@/lib/zod-inputs";
 import { ReadOnlyDemoError, UnauthorizedError, requireUserForAction, requireWritableUser } from "@/server/auth/session";
 import { getDb } from "@/server/db";
 import * as s from "@/server/db/schema";
@@ -39,9 +40,6 @@ export interface SalePreviewView {
   estimatedTaxCad: string | null;
 }
 
-const decimal = z.string().trim().regex(/^\d+(\.\d+)?$/, "Enter a number like 12.5.");
-const positive = decimal.refine((v) => new D(v).gt(0), "Enter a number above zero.");
-const isoDate = z.iso.date("Enter a date.");
 
 function revalidate(securityId: string) {
   revalidatePath(`/hub/securities/${securityId}`);

@@ -1,4 +1,5 @@
 import { runLedger } from "./acb";
+import { computeContributions, type ContributionsInput } from "./contributions";
 import { yearConfig } from "./config/rates";
 import { yearOf } from "./dates";
 import { ZERO, type Dec } from "./decimal";
@@ -29,6 +30,8 @@ export interface ComputeTaxInput {
   marginalRate?: Dec | null;
   /** What the brokers hold today. Without it no reconciliation is produced. */
   brokerPositions?: readonly BrokerPosition[];
+  /** Registered plan cash flows and CRA figures. Without it no contribution results are produced. */
+  contributions?: Omit<ContributionsInput, "fx" | "asOfDate">;
 }
 
 export function computeTax(input: ComputeTaxInput): TaxResult {
@@ -62,6 +65,10 @@ export function computeTax(input: ComputeTaxInput): TaxResult {
     ? reconcile(sorted, run.poolQuantities, input.brokerPositions)
     : { rows: [], matched: 0, total: 0 };
 
+  const contributions = input.contributions
+    ? computeContributions({ ...input.contributions, fx: input.fx, asOfDate: input.asOfDate })
+    : { flows: [], years: [] };
+
   return {
     positions: run.positions,
     acbEvents: run.acbEvents,
@@ -72,5 +79,6 @@ export function computeTax(input: ComputeTaxInput): TaxResult {
     warnings,
     years,
     harvest,
+    contributions,
   };
 }

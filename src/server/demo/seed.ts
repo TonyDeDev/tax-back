@@ -22,12 +22,15 @@ import { addDays, nextBusinessDay } from "@/tax-engine/dates";
  * - MSFT transferred in from a broker TaxBack cannot see, closed with an opening balance.
  * - BCE well below its ACB with no recent purchase: a tax-loss harvesting suggestion.
  * - VFV in the RRSP, where the broker holds more than the history shows: a reconciliation gap.
+ * - Contributions over three years: a TFSA withdrawal put back the same year (an excess, taxed 1% a
+ *   month), RRSP contributions in the first 60 days and a group RRSP entered by hand, an FHSA with a
+ *   carryforward, a transfer from the RRSP, and a deferred deduction, and a transfer to review.
  *
  * Prices and amounts are illustrative, not market data. Exchange rates are real Bank of Canada rates,
  * because `fx_rates` is shared with real users and must never hold invented values.
  */
 
-type AccountKey = "qtMargin" | "qtTfsa" | "wsPersonal" | "wsRrsp" | "wsCash" | "swIndividual" | "swRoth";
+type AccountKey = "qtMargin" | "qtTfsa" | "wsPersonal" | "wsRrsp" | "wsFhsa" | "wsCash" | "swIndividual" | "swRoth";
 type SecurityKey = "XEQT" | "RY" | "RY_US" | "SHOP" | "BCE" | "VFV" | "AAPL" | "MSFT";
 
 const BROKERAGES = [
@@ -44,6 +47,7 @@ const ACCOUNTS: Record<
   qtTfsa: { brokerage: "questrade", name: "TFSA", type: "tfsa", currency: "CAD", last4: "8820" },
   wsPersonal: { brokerage: "wealthsimple", name: "Personal", type: "non_registered", currency: "CAD", last4: "1093" },
   wsRrsp: { brokerage: "wealthsimple", name: "RRSP", type: "rrsp", currency: "CAD", last4: "5571" },
+  wsFhsa: { brokerage: "wealthsimple", name: "FHSA", type: "fhsa", currency: "CAD", last4: "7140" },
   wsCash: { brokerage: "wealthsimple", name: "Cash", type: "non_registered", currency: "CAD", kind: "cash", last4: "3302" },
   swIndividual: { brokerage: "schwab", name: "Individual", type: "non_registered", currency: "USD", last4: "6614" },
   swRoth: { brokerage: "schwab", name: "Roth IRA", type: "us_retirement", currency: "USD", last4: "2958" },
@@ -142,10 +146,73 @@ const CASH: Partial<Record<AccountKey, string>> = {
   // Includes the SHOP sale's proceeds, waiting out the 30-day superficial loss window.
   wsPersonal: "4810.00",
   wsRrsp: "22.70",
+  wsFhsa: "19050.00",
   wsCash: "3500.00",
   swIndividual: "512.33",
   swRoth: "41.00",
 };
+
+/**
+ * Cash into and out of the registered accounts, by tax year relative to this one (`year: -1` is last
+ * year) and calendar day. RRSP contributions on `02-20` of a year count for the year before. Each flow
+ * is a SnapTrade activity except `manual`, which the user entered for an account TaxBack cannot see.
+ */
+interface SeedFlow {
+  account: AccountKey | null;
+  year: 0 | -1 | -2;
+  /** MM-DD. A day still ahead this year is left out until it arrives. */
+  day: string;
+  type: "CONTRIBUTION" | "WITHDRAWAL" | "INTERNAL_CASH_TRANSFER_IN" | "INTERNAL_CASH_TRANSFER_OUT" | "manual";
+  amount: string;
+  plan?: "rrsp";
+  description?: string;
+}
+
+const FLOWS: SeedFlow[] = [
+  // TFSA. Room on January 1 two years ago comes from CRA (below).
+  { account: "qtTfsa", year: -2, day: "02-15", type: "CONTRIBUTION", amount: "10000" },
+  // Moved over from the margin account at the same broker: a contribution, paired with its other side.
+  { account: "qtMargin", year: -1, day: "01-20", type: "INTERNAL_CASH_TRANSFER_OUT", amount: "9000" },
+  { account: "qtTfsa", year: -1, day: "01-20", type: "INTERNAL_CASH_TRANSFER_IN", amount: "9000" },
+  // Withdrawn in April and put back in August: no room until next January, so an excess until October.
+  { account: "qtTfsa", year: -1, day: "04-10", type: "WITHDRAWAL", amount: "3000" },
+  { account: "qtTfsa", year: -1, day: "08-14", type: "CONTRIBUTION", amount: "3000" },
+  { account: "qtTfsa", year: -1, day: "10-20", type: "WITHDRAWAL", amount: "3000" },
+  // A transfer in with no visible other side: TaxBack counts it and asks the user to check.
+  { account: "qtTfsa", year: -1, day: "11-05", type: "INTERNAL_CASH_TRANSFER_IN", amount: "500" },
+  { account: "qtTfsa", year: 0, day: "01-15", type: "CONTRIBUTION", amount: "2500" },
+
+  // RRSP: one contribution a year, one in the first 60 days, and a group RRSP through work.
+  { account: "wsRrsp", year: -2, day: "06-01", type: "CONTRIBUTION", amount: "3000" },
+  { account: "wsRrsp", year: -1, day: "03-20", type: "CONTRIBUTION", amount: "5000" },
+  { account: null, year: -1, day: "12-15", type: "manual", plan: "rrsp", amount: "2400", description: "Group RRSP at work" },
+  { account: "wsRrsp", year: 0, day: "02-20", type: "CONTRIBUTION", amount: "4000" },
+
+  // FHSA, opened two years ago: $5,000 leaves $3,000 to carry forward.
+  { account: "wsFhsa", year: -2, day: "05-01", type: "CONTRIBUTION", amount: "5000" },
+  { account: "wsFhsa", year: -1, day: "03-01", type: "CONTRIBUTION", amount: "8000" },
+  // Cash moved from the RRSP: uses FHSA room but is not deductible.
+  { account: "wsRrsp", year: -1, day: "09-10", type: "INTERNAL_CASH_TRANSFER_OUT", amount: "2000" },
+  { account: "wsFhsa", year: -1, day: "09-10", type: "INTERNAL_CASH_TRANSFER_IN", amount: "2000" },
+  { account: "wsFhsa", year: 0, day: "01-25", type: "CONTRIBUTION", amount: "4000" },
+];
+
+/** What the demo user copied from CRA, and the estimate inputs for the years without it. */
+const CONTRIBUTION_INPUTS: {
+  plan: (typeof s.ROOM_PLANS)[number];
+  year: -2 | -1 | 0;
+  officialRoomCad?: string;
+  earnedIncomePriorYearCad?: string;
+  deductionClaimedCad?: string;
+}[] = [
+  { plan: "tfsa", year: -2, officialRoomCad: "12000" },
+  { plan: "rrsp", year: -2, officialRoomCad: "12000" },
+  { plan: "rrsp", year: -1, earnedIncomePriorYearCad: "88000" },
+  { plan: "rrsp", year: 0, earnedIncomePriorYearCad: "92000" },
+  // Deducting less than allowed leaves the rest for a year with a higher income.
+  { plan: "fhsa", year: -1, deductionClaimedCad: "6000" },
+];
+const DEMO_BIRTH_YEAR = 1988;
 
 /** Days of value history: every day for the last 400, then weekly back to the first trade. */
 const DAILY_HISTORY_DAYS = 400;
@@ -249,6 +316,9 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
   };
 
   const earliest = tradeDay(today, Math.max(...LEDGER.map((e) => e.daysAgo)));
+  const year = Number(today.slice(0, 4));
+  // The contributions start two years back; the accounts' history has to reach that far for room to add up.
+  const historyFrom = [earliest, `${year - 2}-01-01`].sort()[0]!;
   const fx = await syncFx(db, ["USD"], earliest, today);
   if (fx.unsupported.length > 0) throw new Error(`Bank of Canada has no rates for ${fx.unsupported.join(", ")}`);
 
@@ -256,6 +326,7 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
     // Accounts cascade to transactions, holdings, balances, and the derived rows that point at them.
     await tx.delete(s.connections).where(eq(s.connections.userId, DEMO_USER_ID));
     await tx.delete(s.manualAdjustments).where(eq(s.manualAdjustments.userId, DEMO_USER_ID));
+    await tx.delete(s.contributionFlows).where(eq(s.contributionFlows.userId, DEMO_USER_ID));
     await tx.delete(s.corporateActions).where(eq(s.corporateActions.userId, DEMO_USER_ID));
     await tx.delete(s.securityPreferences).where(eq(s.securityPreferences.userId, DEMO_USER_ID));
     await tx.delete(s.syncRuns).where(eq(s.syncRuns.userId, DEMO_USER_ID));
@@ -289,7 +360,7 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
           kind: a.kind ?? ("investment" as const),
           accountType: a.type,
           accountTypeConfirmedAt: a.kind === "cash" ? null : confirmedAt,
-          historyCompleteFrom: earliest,
+          historyCompleteFrom: historyFrom,
         })),
       )
       .returning({ id: s.brokerageAccounts.id, key: s.brokerageAccounts.snaptradeAccountId });
@@ -361,6 +432,42 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
       })),
     );
 
+    // Only days that have happened: early in the year, this year's flows are not there yet.
+    const flows = FLOWS.map((f, i) => ({ ...f, i, date: `${year + f.year}-${f.day}` })).filter((f) => f.date < today);
+    await tx.insert(s.contributionFlows).values(
+      flows.map((f) =>
+        f.type === "manual"
+          ? {
+              userId: DEMO_USER_ID,
+              source: "manual" as const,
+              plan: f.plan!,
+              flowDate: f.date,
+              direction: "in" as const,
+              amount: f.amount,
+              currency: "CAD",
+              description: f.description ?? null,
+              classification: "contribution" as const,
+            }
+          : {
+              userId: DEMO_USER_ID,
+              source: "snaptrade" as const,
+              accountId: accountId(f.account!),
+              snaptradeActivityId: `demo-flow-${f.i + 1}`,
+              brokerType: f.type,
+              flowDate: f.date,
+              direction: f.type === "WITHDRAWAL" || f.type === "INTERNAL_CASH_TRANSFER_OUT" ? ("out" as const) : ("in" as const),
+              amount: f.amount,
+              currency: "CAD",
+              description: "Demo portfolio",
+              raw: { demo: true },
+            },
+      ),
+    );
+    await tx.delete(s.contributionInputs).where(eq(s.contributionInputs.userId, DEMO_USER_ID));
+    await tx.insert(s.contributionInputs).values(
+      CONTRIBUTION_INPUTS.map(({ year: offset, ...input }) => ({ userId: DEMO_USER_ID, taxYear: year + offset, ...input })),
+    );
+
     await tx.insert(s.manualAdjustments).values({
       userId: DEMO_USER_ID,
       securityId: securityId("MSFT"),
@@ -418,7 +525,16 @@ export async function seedDemo(db: AnyDb, today: string, options: SeedOptions = 
     for (let i = 0; i < valueRows.length; i += 1000) await tx.insert(s.accountValueSnapshots).values(valueRows.slice(i, i + 1000));
     for (let i = 0; i < priceRows.length; i += 1000) await tx.insert(s.securityPriceSnapshots).values(priceRows.slice(i, i + 1000));
 
-    await tx.update(s.userProfiles).set({ marginalRate: "0.43410", lastSyncedAt: asOf }).where(eq(s.userProfiles.userId, DEMO_USER_ID));
+    await tx
+      .update(s.userProfiles)
+      .set({
+        marginalRate: "0.43410",
+        birthYear: DEMO_BIRTH_YEAR,
+        residentSinceYear: null,
+        fhsaOpenedYear: Math.max(year - 2, 2023),
+        lastSyncedAt: asOf,
+      })
+      .where(eq(s.userProfiles.userId, DEMO_USER_ID));
 
     await recomputeUser(tx, DEMO_USER_ID, today);
   });

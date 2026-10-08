@@ -94,6 +94,10 @@ Every rule has Vitest tests from worked examples.
 - **Audit trail:** every ACB event records the rule applied and the FX rate used.
 - **Reconciliation:** the replayed ledger is compared with broker positions (pooled non-registered per security, each registered account on its own).
 - **Sale preview:** "what if I sell?" runs the same engine with one hypothetical sale today.
+- **Contributions:** deposits and withdrawals in registered accounts are contributions and withdrawals; same-plan transfers count for nothing, and the user can reclassify any flow.
+  Room for TFSA, RRSP, and FHSA comes from a CRA figure the user enters, else an estimate, else is unknown (never guessed).
+  RRSP contributions in the first 60 days count for the year before; the deduction feeds Schedule 7 and line 20800, the FHSA deduction Schedule 15 and line 20805.
+  An excess is taxed at 1% a month.
 
 `docs/tax-rules.md` lists every rule and its known limits.
 
@@ -101,11 +105,11 @@ The browser never calculates tax; it only displays saved results.
 
 ## Data Model
 
-`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `manual_adjustments`, `corporate_actions`, `security_preferences`, `fx_rates`, the value history `account_value_snapshots` and `security_price_snapshots` (written by each sync, never recomputed), and the derived tables `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`, `position_reconciliations`.
+`users` and `accounts` (Better Auth; `accounts` holds the Google and SnapTrade grants, tokens encrypted), `connections`, `brokerage_accounts`, `securities`, `transactions`, `holdings`, `contribution_flows` (registered-plan cash in and out, synced or entered), `manual_adjustments`, `corporate_actions`, `security_preferences`, `contribution_inputs`, `fx_rates`, the value history `account_value_snapshots` and `security_price_snapshots` (written by each sync, never recomputed), and the derived tables `acb_positions`, `acb_events`, `realized_gains`, `superficial_losses`, `income_events`, `harvest_opportunities`, `position_reconciliations`, `contribution_flow_results`, `contribution_summaries`.
 
 ## Demo Data
 
-`src/server/demo/seed.ts` (run by `pnpm db:seed`) creates a demo user with 3 brokerages, non-registered + TFSA + RRSP + Roth IRA accounts, CAD and USD stocks, the same stock at two brokerages (pooled ACB), a TSX/NYSE interlisted stock, a superficial loss caused by a TFSA buy, a deemed sale into the TFSA, dividends, a harvesting opportunity, and one reconciliation gap, across 3 tax years.
+`src/server/demo/seed.ts` (run by `pnpm db:seed`) creates a demo user with 3 brokerages, non-registered + TFSA + RRSP + Roth IRA accounts, CAD and USD stocks, the same stock at two brokerages (pooled ACB), a TSX/NYSE interlisted stock, a superficial loss caused by a TFSA buy, a deemed sale into the TFSA, dividends, a harvesting opportunity, one reconciliation gap, and contributions (a TFSA excess from a same-year recontribution, RRSP contributions in the first 60 days and by hand, an FHSA with a carryforward, an RRSP-to-FHSA transfer, and a transfer to review), across 3 tax years.
 Dates are relative to today, and exchange rates are real Bank of Canada rates (never invented: `fx_rates` is shared).
 The daily cron resets it, and the Hub seeds it on the first demo visit if it is missing.
 
@@ -115,7 +119,8 @@ The daily cron resets it, and the Hub seeds it on the first demo visit if it is 
 - **Hub** (`/hub`): total value, YTD gains, estimated tax, alerts, accounts grouped by brokerage, investments table (pooled by default, per-account toggle), allocation charts.
   Ledger vs broker reconciliation ("ledger matches broker positions: N%").
   Detail pages for each account and each security (ACB audit trail, "what if I sell?", opening balance, corporate actions).
-- **Tax Center** (`/tax/[year]`): realized gains (Schedule 3 layout), superficial losses, dividends, harvesting suggestions with the 30-day window, CSV export.
+- **Tax Center** (`/tax/[year]`): realized gains (Schedule 3 layout), Schedule 7 and Schedule 15 lines, superficial losses, dividends, harvesting suggestions with the 30-day window, CSV export.
+- **Contributions** (`/contributions/[year]`): room and contributions per registered plan, CRA figures to enter, deposits and withdrawals to reclassify, and contributions TaxBack cannot see.
 - **Settings:** theme, connected brokerages (link to the SnapTrade Dashboard), delete my data (revokes the SnapTrade refresh token first).
 
 Every page shows a "Concept demo - not tax advice" badge.
@@ -166,4 +171,3 @@ Deploy by pushing to GitHub; Vercel builds automatically.
 
 - CSV import from brokerage exports (try TaxBack without a SnapTrade slot).
 - PDF tax report.
-- TFSA / RRSP / FHSA contribution room tracking.

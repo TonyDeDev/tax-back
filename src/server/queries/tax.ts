@@ -2,6 +2,7 @@ import "server-only";
 import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
 import * as s from "@/server/db/schema";
 import type { AnyDb } from "@/server/db/types";
+import { type ContributionReturnView, getContributionReturn } from "@/server/queries/contributions";
 import { getReconciliation } from "@/server/queries/hub";
 import { D, type AccountType, type DividendClass } from "@/tax-engine";
 import { yearOf } from "@/tax-engine/dates";
@@ -149,6 +150,10 @@ export interface ReturnView {
   checks: ReadinessCheck[];
   /** Canadian ETFs that paid distributions into non-registered accounts: the T3 slip has the real split. */
   t3Symbols: string[];
+  /** Schedule 7 and 15 shown this year, with the year their line numbers come from. */
+  contributionForms: ContributionReturnView["forms"];
+  /** The TFSA room check: no form, but an excess is taxed. Null without a TFSA. */
+  tfsa: ContributionReturnView["tfsa"];
 }
 
 export interface TaxYearView {
@@ -356,7 +361,7 @@ async function getReturnView(
 ): Promise<ReturnView> {
   const { totals, gains, losses, dividends } = read;
   const dividendIds = [...new Set(dividends.map((d) => d.securityId))];
-  const [reconciliation, unconfirmed, funds] = await Promise.all([
+  const [reconciliation, unconfirmed, funds, contributions] = await Promise.all([
     getReconciliation(db, userId, today),
     db
       .select({ id: s.brokerageAccounts.id })
@@ -375,6 +380,7 @@ async function getReturnView(
           .from(s.securities)
           .where(and(inArray(s.securities.id, dividendIds), eq(s.securities.securityType, "etf"), eq(s.securities.country, "CA")))
           .orderBy(asc(s.securities.symbol)),
+    getContributionReturn(db, userId, year),
   ]);
 
   const result = returnLines({
@@ -420,6 +426,26 @@ async function getReturnView(
       href: null,
       linkLabel: null,
     })),
+    ...(contributions.flowsToReview > 0
+      ? [
+          {
+            key: "contribution-review",
+            text: `${contributions.flowsToReview} ${contributions.flowsToReview === 1 ? "cash transfer needs" : "cash transfers need"} a look: TaxBack could not tell whether ${contributions.flowsToReview === 1 ? "it is a contribution" : "they are contributions"}.`,
+            href: `/contributions/${year}#activity`,
+            linkLabel: "Review",
+          },
+        ]
+      : []),
+    ...(contributions.rrspLimitUnknown
+      ? [
+          {
+            key: "rrsp-limit",
+            text: `Your RRSP deduction limit for ${year} is unknown, so the RRSP deduction is left out. It is on your notice of assessment.`,
+            href: `/contributions/${year}#rrsp`,
+            linkLabel: "Enter it",
+          },
+        ]
+      : []),
     ...(totals?.configAssumed
       ? [{ key: "rates", text: `The tax rates for ${year} are not verified yet, so the nearest verified year was used.`, href: null, linkLabel: null }]
       : []),
@@ -428,10 +454,12 @@ async function getReturnView(
   return {
     formYear: result.formYear,
     verified: result.verified,
-    lines: result.lines.map((l) => ({ ...l, amountCad: l.amountCad.toFixed(2) })),
+    lines: [...result.lines, ...contributions.lines].map((l) => ({ ...l, amountCad: l.amountCad.toFixed(2) })),
     netCapitalLossCad: result.netCapitalLossCad?.toFixed(2) ?? null,
     checks,
     t3Symbols: funds.map((f) => f.symbol),
+    contributionForms: contributions.forms,
+    tfsa: contributions.tfsa,
   };
 }
 

@@ -1,4 +1,14 @@
-import { D, type Dec, type FxLookup, type LedgerEntry, type OpeningAdjustment, type TaxResult } from "@/tax-engine";
+import {
+  type CashFlow,
+  type ContributionYearInput,
+  D,
+  type Dec,
+  type FxLookup,
+  type LedgerEntry,
+  type OpeningAdjustment,
+  type PlanYear,
+  type TaxResult,
+} from "@/tax-engine";
 import type * as s from "./schema";
 
 /*
@@ -14,6 +24,9 @@ type ManualAdjustmentRow = typeof s.manualAdjustments.$inferSelect;
 type CorporateActionRow = typeof s.corporateActions.$inferSelect;
 type SecurityWithCurrency = SecurityRow & { currency: string };
 type FxRow = Pick<typeof s.fxRates.$inferSelect, "currency" | "rateDate" | "cadPerUnit">;
+type ContributionFlowRow = typeof s.contributionFlows.$inferSelect;
+type ContributionInputRow = typeof s.contributionInputs.$inferSelect;
+type FlowAccountRow = Pick<typeof s.brokerageAccounts.$inferSelect, "id" | "accountType" | "kind">;
 
 const OPENING_PREFIX = "opening:";
 const CORPORATE_PREFIX = "corporate:";
@@ -76,6 +89,43 @@ export function toOpenings(
     quantity: new D(r.quantity),
     acbCad: new D(r.acbCad),
     asOfDate: r.asOfDate,
+  }));
+}
+
+/**
+ * Registered plan cash flows for the engine. A synced flow takes its account's current type, so
+ * confirming an account as a TFSA turns its deposits into TFSA contributions on the next recompute.
+ */
+export function toCashFlows(rows: readonly ContributionFlowRow[], accounts: readonly FlowAccountRow[]): CashFlow[] {
+  const byId = new Map(accounts.map((a) => [a.id, a]));
+  return rows.map((r) => {
+    const account = r.accountId === null ? null : lookup(byId, r.accountId, "account");
+    const plan = account ? account.accountType : r.plan;
+    if (plan === null) throw new Error(`Contribution flow ${r.id} has neither an account nor a plan`);
+    return {
+      id: r.id,
+      accountId: r.accountId,
+      plan,
+      investment: account === null || account.kind === "investment",
+      date: r.flowDate,
+      direction: r.direction,
+      amount: new D(r.amount),
+      currency: r.currency,
+      brokerType: r.brokerType,
+      classification: r.classification,
+    };
+  });
+}
+
+export function toContributionInputs(rows: readonly ContributionInputRow[]): ContributionYearInput[] {
+  return rows.map((r) => ({
+    plan: r.plan,
+    year: r.taxYear,
+    officialRoom: dec(r.officialRoomCad) ?? null,
+    unusedCarriedForward: dec(r.unusedCarriedForwardCad) ?? null,
+    earnedIncomePriorYear: dec(r.earnedIncomePriorYearCad) ?? null,
+    pensionAdjustment: dec(r.pensionAdjustmentCad) ?? null,
+    deductionClaimed: dec(r.deductionClaimedCad) ?? null,
   }));
 }
 
@@ -160,6 +210,73 @@ export interface DerivedRows {
   taxYearSummaries: (typeof s.taxYearSummaries.$inferInsert)[];
   taxWarnings: (typeof s.taxWarnings.$inferInsert)[];
   positionReconciliations: (typeof s.positionReconciliations.$inferInsert)[];
+  contributionFlowResults: (typeof s.contributionFlowResults.$inferInsert)[];
+  contributionSummaries: (typeof s.contributionSummaries.$inferInsert)[];
+}
+
+const optionalMoney = (value: Dec | null | undefined): string | null => (value === null || value === undefined ? null : moneyText(value));
+
+function summaryRow(userId: string, y: PlanYear): typeof s.contributionSummaries.$inferInsert {
+  const base = {
+    userId,
+    plan: y.plan,
+    taxYear: y.year,
+    withdrawalsCad: moneyText(y.withdrawalsCad),
+  };
+  switch (y.plan) {
+    case "tfsa":
+      return {
+        ...base,
+        roomSource: y.roomSource,
+        estimateIncomplete: y.estimateIncomplete,
+        limitAssumed: y.limitAssumed,
+        contributionsCad: moneyText(y.contributionsCad),
+        peakExcessCad: moneyText(y.peakExcessCad),
+        penaltyCad: moneyText(y.penaltyCad),
+        openingRoomCad: optionalMoney(y.openingRoomCad),
+        roomRemainingCad: optionalMoney(y.roomRemainingCad),
+        restoredNextYearCad: moneyText(y.restoredNextYearCad),
+      };
+    case "rrsp":
+      return {
+        ...base,
+        roomSource: y.roomSource,
+        limitAssumed: y.limitAssumed,
+        contributionsCad: moneyText(y.periodOneCad.plus(y.periodTwoCad)),
+        peakExcessCad: moneyText(y.peakExcessCad),
+        penaltyCad: moneyText(y.penaltyCad),
+        unusedFromPriorCad: moneyText(y.unusedFromPriorCad),
+        periodOneCad: moneyText(y.periodOneCad),
+        periodTwoCad: moneyText(y.periodTwoCad),
+        deadline: y.deadline,
+        deductionLimitCad: optionalMoney(y.deductionLimitCad),
+        maxDeductionCad: optionalMoney(y.maxDeductionCad),
+        deductionCad: optionalMoney(y.deductionCad),
+        carryForwardCad: optionalMoney(y.carryForwardCad),
+        unusedRoomCad: optionalMoney(y.unusedRoomCad),
+      };
+    case "fhsa":
+      return {
+        ...base,
+        roomSource: y.roomSource,
+        contributionsCad: moneyText(y.contributionsCad),
+        peakExcessCad: moneyText(y.peakExcessCad),
+        penaltyCad: moneyText(y.penaltyCad),
+        roomRemainingCad: moneyText(y.roomRemainingCad),
+        unusedFromPriorCad: moneyText(y.unusedFromPriorCad),
+        maxDeductionCad: moneyText(y.maxDeductionCad),
+        deductionCad: moneyText(y.deductionCad),
+        carryForwardCad: moneyText(y.carryForwardCad),
+        firstYear: y.firstYear,
+        participationRoomCad: moneyText(y.participationRoomCad),
+        carryforwardInCad: moneyText(y.carryforwardInCad),
+        rrspTransfersCad: moneyText(y.rrspTransfersCad),
+        annualLimitCad: moneyText(y.annualLimitCad),
+        lifetimeUsedCad: moneyText(y.lifetimeUsedCad),
+      };
+    default:
+      return { ...base, contributionsCad: moneyText(y.contributionsCad) };
+  }
 }
 
 /** Maps engine output to insert rows. `openingIds` maps securityId to the manual adjustment that produced its opening. */
@@ -330,5 +447,16 @@ export function toDerivedRows(
       brokerQuantity: quantityText(r.brokerQuantity),
       status: r.status,
     })),
+    contributionFlowResults: result.contributions.flows.map((f) => ({
+      userId,
+      flowId: f.flowId,
+      plan: f.plan,
+      kind: f.kind,
+      taxYear: f.taxYear,
+      amountCad: moneyText(f.amountCad),
+      fxRate: f.fxRate ? f.fxRate.toFixed(10) : null,
+      needsReview: f.needsReview,
+    })),
+    contributionSummaries: result.contributions.years.map((y) => summaryRow(userId, y)),
   };
 }

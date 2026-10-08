@@ -231,7 +231,7 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
     return id;
   };
 
-  const counts = { accounts: 0, transactions: 0, holdings: 0 };
+  const counts = { accounts: 0, transactions: 0, holdings: 0, cashFlows: 0 };
   for (const f of fetched.accounts) {
     const a = f.account;
     const [row] = await tx
@@ -345,6 +345,40 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
         });
     }
     counts.transactions += transactionRows.length;
+
+    // Cash in and out, upserted the same way. The user's classification is never touched by a sync.
+    const flowRows = f.activities.cashFlows.map((c) => ({
+      userId,
+      source: "snaptrade" as const,
+      accountId,
+      snaptradeActivityId: c.snaptradeActivityId,
+      brokerType: c.brokerType,
+      flowDate: c.date,
+      direction: c.direction,
+      amount: moneyText(c.amount),
+      currency: c.currency,
+      description: c.description,
+      raw: c.raw,
+    }));
+    for (let i = 0; i < flowRows.length; i += CHUNK) {
+      await tx
+        .insert(s.contributionFlows)
+        .values(flowRows.slice(i, i + CHUNK))
+        .onConflictDoUpdate({
+          target: [s.contributionFlows.accountId, s.contributionFlows.snaptradeActivityId],
+          set: {
+            brokerType: excluded("broker_type"),
+            flowDate: excluded("flow_date"),
+            direction: excluded("direction"),
+            amount: excluded("amount"),
+            currency: excluded("currency"),
+            description: excluded("description"),
+            raw: excluded("raw"),
+            updatedAt: now,
+          },
+        });
+    }
+    counts.cashFlows += flowRows.length;
   }
 
   // Accounts SnapTrade no longer lists are kept while they hold history (closed accounts still carry ACB);
@@ -357,6 +391,7 @@ async function writeAll(tx: AnyDb, userId: string, fetched: Fetched, now: Date) 
         eq(s.brokerageAccounts.userId, userId),
         kept.length > 0 ? notInArray(s.brokerageAccounts.snaptradeAccountId, kept) : undefined,
         sql`NOT EXISTS (SELECT 1 FROM ${s.transactions} WHERE ${s.transactions.accountId} = ${s.brokerageAccounts.id})`,
+        sql`NOT EXISTS (SELECT 1 FROM ${s.contributionFlows} WHERE ${s.contributionFlows.accountId} = ${s.brokerageAccounts.id})`,
       ),
     );
   await tx
@@ -433,18 +468,20 @@ export async function syncUser(
     const counts = await db.transaction((tx) => writeAll(tx, userId, fetched, now));
 
     const today = torontoToday(now);
-    const [range] = await db
-      .select({ first: min(s.transactions.settlementDate) })
-      .from(s.transactions)
-      .where(eq(s.transactions.userId, userId));
+    const [[range], [flowRange]] = await Promise.all([
+      db.select({ first: min(s.transactions.settlementDate) }).from(s.transactions).where(eq(s.transactions.userId, userId)),
+      db.select({ first: min(s.contributionFlows.flowDate) }).from(s.contributionFlows).where(eq(s.contributionFlows.userId, userId)),
+    ]);
+    const firstDate = [range?.first, flowRange?.first, today].filter((d): d is string => !!d).sort()[0]!;
     const currencies = new Set<string>();
     for (const f of fetched.accounts) {
       for (const t of f.activities.transactions) currencies.add(t.currency);
+      for (const c of f.activities.cashFlows) currencies.add(c.currency);
       for (const h of f.holdings) currencies.add(h.currency);
       for (const b of f.balances) currencies.add(b.currency);
       if (f.holdingsUnreported && f.account.reportedTotalCurrency) currencies.add(f.account.reportedTotalCurrency);
     }
-    const fx = await syncFxRates(db, currencies, range?.first ?? today, today);
+    const fx = await syncFxRates(db, currencies, firstDate, today);
 
     await recomputeUser(db, userId, today);
     await writeValueSnapshots(db, userId, today);

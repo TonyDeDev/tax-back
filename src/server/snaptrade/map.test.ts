@@ -404,15 +404,33 @@ describe("mapActivities", () => {
     expect(skipped).toEqual({ RETURN_OF_CAPITAL_REVERSAL: 1 });
   });
 
-  it("counts cash movements, interest, and options as skipped", () => {
-    const { transactions, skipped } = mapActivities([
-      activity({ type: "CONTRIBUTION", symbol: null, amount: 1000 }),
+  it("counts interest and options as skipped", () => {
+    const { transactions, cashFlows, skipped } = mapActivities([
       activity({ type: "INTEREST", symbol: null, amount: 0.01 }),
-      activity({ type: "INTERNAL_CASH_TRANSFER_IN", symbol: null, amount: 5 }),
       activity({ type: "BUY", option_symbol: { id: "opt" }, units: 1, price: 2 }),
     ]);
     expect(transactions).toEqual([]);
-    expect(skipped).toEqual({ CONTRIBUTION: 1, INTEREST: 1, INTERNAL_CASH_TRANSFER_IN: 1, OPTION_BUY: 1 });
+    expect(cashFlows).toEqual([]);
+    expect(skipped).toEqual({ INTEREST: 1, OPTION_BUY: 1 });
+  });
+
+  it("keeps cash moving in and out as cash flows, with the direction from the sign", () => {
+    const { transactions, cashFlows, skipped } = mapActivities([
+      activity({ id: "c1", type: "CONTRIBUTION", symbol: null, amount: 1000, trade_date: "2026-02-27T15:00:00Z", settlement_date: null }),
+      activity({ id: "w1", type: "WITHDRAWAL", symbol: null, amount: -250.5, currency: { code: "USD", name: "US Dollar", id: "cur-usd" } }),
+      activity({ id: "i1", type: "INTERNAL_CASH_TRANSFER_IN", symbol: null, amount: 5 }),
+      activity({ id: "t1", type: "TRANSFER", symbol: null, amount: -40 }),
+      activity({ id: "z1", type: "CONTRIBUTION", symbol: null, amount: 0 }),
+    ]);
+    expect(transactions).toEqual([]);
+    expect(cashFlows.map((f) => [f.snaptradeActivityId, f.brokerType, f.direction, f.amount.toString(), f.currency])).toEqual([
+      ["c1", "CONTRIBUTION", "in", "1000", "CAD"],
+      ["i1", "INTERNAL_CASH_TRANSFER_IN", "in", "5", "CAD"],
+      ["t1", "TRANSFER", "out", "40", "CAD"],
+      ["w1", "WITHDRAWAL", "out", "250.5", "USD"],
+    ]);
+    expect(cashFlows[0]!.date).toBe("2026-02-27");
+    expect(skipped).toEqual({ CONTRIBUTION: 1 });
   });
 
   it("reports the earliest activity date, skipped ones included", () => {
@@ -441,9 +459,9 @@ describe("mapActivities", () => {
     expect(dividend).toMatchObject({ kind: "dividend", settlementDate: "2026-04-09", tradeDate: "2026-04-09" });
   });
 
-  it("skips a cash transfer with no security instead of failing the sync", () => {
+  it("reads a cash transfer with no security as a cash flow instead of failing the sync", () => {
     // The exact shape SnapTrade returns for a sandbox cash transfer: no symbol, no units, no settlement.
-    const { transactions, skipped } = mapActivities([
+    const { transactions, cashFlows, skipped } = mapActivities([
       {
         id: "cbb3d62b-e2cc-4722-a333-0e5034927e41",
         symbol: null,
@@ -460,7 +478,8 @@ describe("mapActivities", () => {
       },
     ]);
     expect(transactions).toEqual([]);
-    expect(skipped).toEqual({ TRANSFER: 1 });
+    expect(skipped).toEqual({});
+    expect(cashFlows).toMatchObject([{ brokerType: "TRANSFER", direction: "in", currency: "USD", date: "2026-09-30" }]);
   });
 
   it("rejects an activity that carries no date at all", () => {

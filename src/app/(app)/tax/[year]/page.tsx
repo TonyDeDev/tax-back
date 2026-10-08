@@ -10,10 +10,10 @@ import { CopyAmount } from "@/components/tax/copy-amount";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { YearNav } from "@/components/year-nav";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
 import { formatDate, formatPercent, formatQuantity } from "@/lib/format";
 import { DIVIDEND_CLASS_LABELS, GAIN_KIND_LABELS } from "@/lib/tax-csv";
-import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
 import { getDb } from "@/server/db";
 import { ensureDemoSeeded } from "@/server/demo/seed";
@@ -21,26 +21,6 @@ import { groupDividends, getTaxYear, getTaxYears, type TaxYearView } from "@/ser
 import { torontoToday } from "@/server/recompute";
 
 export const metadata: Metadata = { title: "Tax Center" };
-
-function YearNav({ years, current }: { years: number[]; current: number }) {
-  return (
-    <nav aria-label="Tax year" className="flex flex-wrap gap-1">
-      {years.map((y) => (
-        <Link
-          key={y}
-          href={`/tax/${y}`}
-          aria-current={y === current ? "page" : undefined}
-          className={cn(
-            "rounded-sm px-3 py-1.5 text-body-sm font-medium tabular-nums transition-colors",
-            y === current ? "bg-accent text-accent-foreground" : "text-muted-foreground hover:bg-accent",
-          )}
-        >
-          {y}
-        </Link>
-      ))}
-    </nav>
-  );
-}
 
 function Summary({ view }: { view: TaxYearView }) {
   const t = view.totals;
@@ -114,6 +94,34 @@ function Readiness({ view }: { view: TaxYearView }) {
   );
 }
 
+/** No form for a TFSA, but an excess is taxed: the room left, or the excess and its tax. */
+function TfsaCheck({ tfsa, year }: { tfsa: NonNullable<TaxYearView["returnView"]["tfsa"]>; year: number }) {
+  const over = Number(tfsa.peakExcessCad) > 0;
+  return (
+    <p className="flex items-start gap-2 text-body-sm">
+      {over ? (
+        <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-negative" />
+      ) : (
+        <CircleCheck aria-hidden className="mt-0.5 size-4 shrink-0 text-positive" />
+      )}
+      <span>
+        {over ? (
+          <>
+            TFSA: you went over your room in {year}. File Form RC243 for an estimated <Money value={tfsa.penaltyCad} /> of tax.{" "}
+          </>
+        ) : (
+          <>
+            TFSA: nothing to file. <Money value={tfsa.roomRemainingCad!} /> of room left{tfsa.roomSource === "cra" ? "" : " (estimated)"}.{" "}
+          </>
+        )}
+        <Link href={`/contributions/${year}#tfsa`} className="text-link hover:underline">
+          Details
+        </Link>
+      </span>
+    </p>
+  );
+}
+
 /** The amounts to type into the return, one row per line, with the form and line number to find it by. */
 function FillOutReturn({ view }: { view: TaxYearView }) {
   const r = view.returnView;
@@ -125,6 +133,13 @@ function FillOutReturn({ view }: { view: TaxYearView }) {
           Line numbers are from the {r.formYear} forms. CRA has not published the {view.year} forms yet, so check them when it does.
         </p>
       )}
+      {r.contributionForms
+        .filter((f) => !f.verified && f.formYear !== r.formYear)
+        .map((f) => (
+          <p key={f.form} className="text-caption text-muted-foreground">
+            {f.form} line numbers are from the {f.formYear} form. Check them once CRA publishes the {view.year} form.
+          </p>
+        ))}
       <ul className="flex flex-col divide-y divide-border rounded-md border">
         {r.lines.map((l) => (
           <li key={l.key} className="flex items-start gap-3 px-4 py-3">
@@ -132,7 +147,8 @@ function FillOutReturn({ view }: { view: TaxYearView }) {
               <span className="flex flex-wrap items-center gap-2">
                 <Badge variant="outline" className="font-mono">
                   {l.form}
-                  {l.line ? ` · ${l.line}` : ""}
+                  {/* A schedule's own step lines are short ("20"); the return's are five digits. */}
+                  {l.line ? ` · ${l.line.length < 5 ? `line ${l.line}` : l.line}` : ""}
                 </Badge>
                 <span className="text-body-sm font-medium">{l.label}</span>
               </span>
@@ -145,6 +161,7 @@ function FillOutReturn({ view }: { view: TaxYearView }) {
           </li>
         ))}
       </ul>
+      {r.tfsa?.roomRemainingCad && <TfsaCheck tfsa={r.tfsa} year={view.year} />}
       {r.netCapitalLossCad && (
         <p className="text-body-sm text-muted-foreground">
           You have a net capital loss of <Money value={r.netCapitalLossCad} /> for {view.year}. It does not go on line 12700: you can apply it against
@@ -152,8 +169,12 @@ function FillOutReturn({ view }: { view: TaxYearView }) {
         </p>
       )}
       <p className="text-caption text-muted-foreground">
-        Not covered: interest income, carrying charges (line 22100), losses from other years (line 25300), RRSP and FHSA deductions, foreign
-        property (Form T1135), and provincial forms.
+        Not covered: interest income, carrying charges (line 22100), losses from other years (line 25300), Home Buyers&apos; Plan and Lifelong
+        Learning Plan repayments, foreign property (Form T1135), and provincial forms. RRSP and FHSA lines come from the{" "}
+        <Link href={`/contributions/${view.year}`} className="text-link hover:underline">
+          Contributions
+        </Link>{" "}
+        page.
       </p>
     </div>
   );
@@ -591,7 +612,7 @@ export default async function TaxCenter(props: PageProps<"/tax/[year]">) {
         }
       />
 
-      <YearNav years={years} current={year} />
+      <YearNav years={years} current={year} basePath="/tax" />
 
       {view.totals?.configAssumed && (
         <p role="alert" className="flex items-start gap-2 rounded-md border border-border px-4 py-3 text-body-sm text-muted-foreground">
@@ -607,7 +628,8 @@ export default async function TaxCenter(props: PageProps<"/tax/[year]">) {
         <CardHeader>
           <CardTitle>Fill out your return</CardTitle>
           <CardDescription>
-            What to enter for {year}, line by line, from your non-registered accounts. Copy each amount into your tax software.
+            What to enter for {year}, line by line: gains and income from your non-registered accounts, and RRSP and FHSA
+            contributions. Copy each amount into your tax software.
           </CardDescription>
         </CardHeader>
         <CardContent>

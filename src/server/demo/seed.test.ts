@@ -16,6 +16,7 @@ import {
   getValueHistory,
   latestChange,
 } from "@/server/queries/hub";
+import { getContributionAlerts, getContributionReturn, getContributions } from "@/server/queries/contributions";
 import { addDays } from "@/tax-engine/dates";
 import { ensureDemoSeeded, seedDemo } from "./seed";
 
@@ -55,14 +56,96 @@ afterAll(async () => {
 });
 
 describe("demo seed", () => {
-  it("creates the read-only demo user with three brokerages and seven accounts", async () => {
+  it("creates the read-only demo user with three brokerages and eight accounts", async () => {
     const [profile] = await db.select().from(s.userProfiles).where(eq(s.userProfiles.userId, DEMO_USER_ID));
     expect(profile).toMatchObject({ isDemo: true, marginalRate: "0.43410" });
     expect(await db.select().from(s.connections).where(eq(s.connections.userId, DEMO_USER_ID))).toHaveLength(3);
     const accounts = await db.select().from(s.brokerageAccounts).where(eq(s.brokerageAccounts.userId, DEMO_USER_ID));
     expect(accounts.map((a) => a.accountType).sort()).toEqual(
-      ["non_registered", "non_registered", "non_registered", "non_registered", "rrsp", "tfsa", "us_retirement"].sort(),
+      ["non_registered", "non_registered", "non_registered", "non_registered", "rrsp", "fhsa", "tfsa", "us_retirement"].sort(),
     );
+  });
+
+  it("tracks contributions to every registered plan over three years", async () => {
+    const rows = await db.select().from(s.contributionSummaries).where(eq(s.contributionSummaries.userId, DEMO_USER_ID));
+    const get = (plan: string, year: number) => rows.find((r) => r.plan === plan && r.taxYear === year)!;
+
+    // TFSA: CRA's $12,000 for 2024, then $9,000 on January 1, 2025. Withdrawn in April and put back in
+    // August, the $3,000 is an excess until October, and an unpaired $500 transfer in November adds one
+    // to December: 3 x $30 + 2 x $5 = $100. 2026 opens at -500 + 3,000 back + 7,000 = $9,500.
+    expect(get("tfsa", 2024)).toMatchObject({ roomSource: "cra", openingRoomCad: "12000.000000", roomRemainingCad: "2000.000000" });
+    expect(get("tfsa", 2025)).toMatchObject({
+      roomSource: "estimate",
+      estimateIncomplete: false,
+      openingRoomCad: "9000.000000",
+      peakExcessCad: "3000.000000",
+      penaltyCad: "100.000000",
+      roomRemainingCad: "-500.000000",
+    });
+    expect(get("tfsa", 2026)).toMatchObject({ openingRoomCad: "9500.000000", roomRemainingCad: "7000.000000", penaltyCad: "0.000000" });
+
+    // RRSP: 2025's limit is 2024's unused $9,000 + 18% of $88,000. February 2026's $4,000 counts for 2025.
+    expect(get("rrsp", 2024)).toMatchObject({ roomSource: "cra", deductionCad: "3000.000000", unusedRoomCad: "9000.000000" });
+    expect(get("rrsp", 2025)).toMatchObject({
+      roomSource: "estimate",
+      deductionLimitCad: "24840.000000",
+      periodOneCad: "7400.000000",
+      periodTwoCad: "4000.000000",
+      deductionCad: "11400.000000",
+      deadline: "2026-03-02",
+    });
+    expect(get("rrsp", 2026)).toMatchObject({ deductionLimitCad: "30000.000000", contributionsCad: "0.000000" });
+
+    // FHSA: $3,000 carried into 2025; the $2,000 from the RRSP uses room; $6,000 of $8,000 deducted.
+    expect(get("fhsa", 2024)).toMatchObject({ firstYear: true, annualLimitCad: "5000.000000", roomRemainingCad: "3000.000000" });
+    expect(get("fhsa", 2025)).toMatchObject({
+      participationRoomCad: "11000.000000",
+      rrspTransfersCad: "2000.000000",
+      annualLimitCad: "8000.000000",
+      deductionCad: "6000.000000",
+      carryForwardCad: "2000.000000",
+      roomRemainingCad: "1000.000000",
+    });
+    expect(get("fhsa", 2026)).toMatchObject({ participationRoomCad: "9000.000000", deductionCad: "6000.000000", carryForwardCad: "0.000000" });
+
+    const review = await db
+      .select()
+      .from(s.contributionFlowResults)
+      .where(and(eq(s.contributionFlowResults.userId, DEMO_USER_ID), eq(s.contributionFlowResults.needsReview, true)));
+    expect(review).toMatchObject([{ plan: "tfsa", kind: "contribution", taxYear: 2025, amountCad: "500.000000" }]);
+  });
+
+  it("lays out Schedule 7 and Schedule 15 for the Tax Center, and lists the year's flows", async () => {
+    const r = await getContributionReturn(db, DEMO_USER_ID, 2025);
+    const byLine = Object.fromEntries(r.lines.map((l) => [`${l.form} ${l.line}`, l.amountCad.toFixed(2)]));
+    expect(byLine).toMatchObject({
+      "Schedule 7 2": "7400.00",
+      "Schedule 7 3": "4000.00",
+      "Schedule 7 4": "11400.00",
+      "Schedule 7 11": "24840.00",
+      "Schedule 7 20": "11400.00",
+      "T1 20800": "11400.00",
+      "Schedule 15 1": "8000.00",
+      "Schedule 15 15": "3000.00",
+      "Schedule 15 18": "2000.00",
+      "Schedule 15 40": "8000.00",
+      "Schedule 15 57": "6000.00",
+      "Schedule 15 58": "2000.00",
+      "T1 20805": "6000.00",
+    });
+    expect(r).toMatchObject({ rrspLimitUnknown: false, flowsToReview: 1 });
+    expect(r.tfsa).toMatchObject({ penaltyCad: "100.000000" });
+
+    const view = await getContributions(db, DEMO_USER_ID, 2025, TODAY);
+    expect(view.summaries.map((x) => x.plan)).toEqual(["tfsa", "rrsp", "fhsa"]);
+    // February 2026's RRSP contribution is listed under 2025, where it counts; the margin side of the TFSA transfer is not listed.
+    expect(view.flows.some((f) => f.date === "2026-02-20" && f.plan === "rrsp")).toBe(true);
+    expect(view.flows.every((f) => f.accountName !== "Margin")).toBe(true);
+    expect(view.inputs.rrsp.earnedIncomePriorYear).toBe("88000.00");
+    expect(view.profile).toEqual({ birthYear: "1988", residentSinceYear: "", fhsaOpenedYear: "2024" });
+    // Nothing is over the limit this year, so the Hub has no contribution alert.
+    expect(await getContributionAlerts(db, DEMO_USER_ID, 2026)).toEqual([]);
+    expect(await getContributionAlerts(db, DEMO_USER_ID, 2025)).toMatchObject([{ plan: "tfsa", peakExcessCad: "3000.000000" }]);
   });
 
   it("has realized gains in three tax years", async () => {

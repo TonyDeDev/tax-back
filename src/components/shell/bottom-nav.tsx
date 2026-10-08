@@ -9,7 +9,7 @@ export function BottomNav() {
   const pathname = usePathname();
   return (
     <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-10 border-t bg-card lg:hidden">
-      <ul className="grid grid-cols-3">
+      <ul className="grid grid-cols-4">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item);
           return (
@@ -23,7 +23,7 @@ export function BottomNav() {
                 )}
               >
                 <item.icon aria-hidden className={cn("size-5", active && "text-primary")} />
-                {item.label}
+                {item.shortLabel ?? item.label}
               </Link>
             </li>
           );

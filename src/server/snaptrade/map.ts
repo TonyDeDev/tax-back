@@ -356,10 +356,26 @@ export interface MappedTransaction {
   raw: Record<string, unknown>;
 }
 
+/** Cash moved into or out of the account: what registered plan contributions and withdrawals are read from. */
+export interface MappedCashFlow {
+  snaptradeActivityId: string;
+  /** The SnapTrade type, kept so the engine can tell a deposit from a transfer between the user's own accounts. */
+  brokerType: string;
+  /** The trade date: the day the money moved, which decides the RRSP contribution period. */
+  date: string;
+  direction: "in" | "out";
+  /** Positive. */
+  amount: Dec;
+  currency: string;
+  description: string | null;
+  raw: Record<string, unknown>;
+}
+
 export interface MappedActivities {
   transactions: MappedTransaction[];
+  cashFlows: MappedCashFlow[];
   securities: MappedSecurity[];
-  /** Activities with no tax meaning or no ledger kind (deposits, interest, options), counted by type. */
+  /** Activities with no tax meaning or no ledger kind (interest, options), counted by type. */
   skipped: Record<string, number>;
   /** Earliest activity date SnapTrade returned, or null when there were none. */
   earliestDate: string | null;
@@ -386,6 +402,14 @@ const LEDGER_TYPES = new Set([
   "INTERNAL_ASSET_TRANSFER_IN",
   "INTERNAL_ASSET_TRANSFER_OUT",
 ]);
+
+/**
+ * Cash in and out, stored as contribution flows rather than ledger transactions. A plain `TRANSFER` with
+ * no security is cash too, and is read there. `DEPOSIT` is not a documented activity type but costs
+ * nothing to accept.
+ */
+const CASH_FLOW_TYPES = new Set(["CONTRIBUTION", "DEPOSIT", "WITHDRAWAL", "INTERNAL_CASH_TRANSFER_IN", "INTERNAL_CASH_TRANSFER_OUT"]);
+const isStored = (type: string) => LEDGER_TYPES.has(type) || CASH_FLOW_TYPES.has(type);
 
 interface Parsed {
   activity: SnapTradeActivity;
@@ -443,12 +467,13 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
   const skip = (type: string) => (skipped[type] = (skipped[type] ?? 0) + 1);
   const securities = new Map<string, MappedSecurity>();
   const transactions: MappedTransaction[] = [];
+  const cashFlows: MappedCashFlow[] = [];
   let earliestDate: string | null = null;
 
   const parsed: Parsed[] = [];
   for (const raw of activities) {
     const type = String(raw.type);
-    if (!LEDGER_TYPES.has(type)) {
+    if (!isStored(type)) {
       skip(type);
       continue;
     }
@@ -457,7 +482,7 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
   for (const p of parsed) if (earliestDate === null || p.settlementDate < earliestDate) earliestDate = p.settlementDate;
   // Skipped types still bound how far back the history reaches, and they are the ones with no settlement date.
   for (const raw of activities) {
-    if (LEDGER_TYPES.has(String(raw.type))) continue;
+    if (isStored(String(raw.type))) continue;
     const reported = [raw.settlement_date, raw.trade_date].find((d) => typeof d === "string");
     if (reported === undefined) continue;
     const date = torontoDate(reported);
@@ -523,8 +548,31 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
     raw: p.raw,
   });
 
+  /** Direction from the sign: SnapTrade gives money into the account a positive amount. */
+  const cashFlow = (p: Parsed) => {
+    const amount = dec(p.activity.amount);
+    if (amount.isZero()) {
+      skip(p.activity.type);
+      return;
+    }
+    cashFlows.push({
+      snaptradeActivityId: p.activity.id,
+      brokerType: p.activity.type,
+      date: p.tradeDate,
+      direction: amount.isNegative() ? "out" : "in",
+      amount: amount.abs(),
+      currency: [p.activity.currency?.code].find(isCurrency) ?? "CAD",
+      description: p.activity.description ?? null,
+      raw: p.raw,
+    });
+  };
+
   for (const p of parsed) {
     const a = p.activity;
+    if (CASH_FLOW_TYPES.has(a.type) || (a.type === "TRANSFER" && !a.symbol && !a.option_symbol)) {
+      cashFlow(p);
+      continue;
+    }
     if (a.option_symbol) {
       skip(`OPTION_${a.type}`);
       continue;
@@ -682,5 +730,5 @@ export function mapActivities(activities: readonly Record<string, unknown>[]): M
     }
   }
 
-  return { transactions, securities: [...securities.values()], skipped, earliestDate };
+  return { transactions, cashFlows, securities: [...securities.values()], skipped, earliestDate };
 }

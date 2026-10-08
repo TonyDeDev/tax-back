@@ -106,6 +106,17 @@ export const WARNING_TYPES = [
   "split_reported_twice",
   "assumed_year_config",
 ] as const;
+/** Account types that are registered plans: contributions to them are tracked. */
+export const PLAN_TYPES = ["tfsa", "rrsp", "fhsa", "resp", "rrif", "lira", "us_retirement"] as const;
+/** Plans whose contribution room is tracked, and for which the user can enter CRA's figures. */
+export const ROOM_PLANS = ["tfsa", "rrsp", "fhsa"] as const;
+export const FLOW_SOURCES = ["snaptrade", "manual"] as const;
+export const FLOW_DIRECTIONS = ["in", "out"] as const;
+/** The user's reading of a cash flow, overriding the automatic one. Mirrors the engine's `FlowClassification`. */
+export const FLOW_CLASSIFICATIONS = ["contribution", "withdrawal", "transfer", "rrsp_to_fhsa", "ignore"] as const;
+/** Mirrors the engine's `FlowKind`. */
+export const FLOW_KINDS = ["contribution", "withdrawal", "transfer", "rrsp_to_fhsa", "ignored"] as const;
+export const ROOM_SOURCES = ["cra", "estimate", "unknown"] as const;
 
 // ===== Profile =====
 
@@ -118,6 +129,11 @@ export const userProfiles = pgTable(
     isDemo: boolean("is_demo").notNull().default(false),
     /** User-chosen marginal rate for the tax estimate; null means no estimate. */
     marginalRate: rate("marginal_rate"),
+    /** Contribution room estimates: TFSA room starts the year the user turns 18 (or became a resident). */
+    birthYear: smallint("birth_year"),
+    residentSinceYear: smallint("resident_since_year"),
+    /** The year the first FHSA was opened; null to take the year of the first FHSA activity. */
+    fhsaOpenedYear: smallint("fhsa_opened_year"),
     lastSyncedAt: instant("last_synced_at"),
     lastRecomputedAt: instant("last_recomputed_at"),
     createdAt: createdAt(),
@@ -129,6 +145,9 @@ export const userProfiles = pgTable(
       "user_profiles_marginal_rate_check",
       sql`marginal_rate IS NULL OR (marginal_rate >= 0 AND marginal_rate < 1)`,
     ),
+    check("user_profiles_birth_year_check", sql`birth_year IS NULL OR birth_year BETWEEN 1900 AND 2100`),
+    check("user_profiles_resident_since_check", sql`resident_since_year IS NULL OR resident_since_year BETWEEN 1900 AND 2100`),
+    check("user_profiles_fhsa_opened_check", sql`fhsa_opened_year IS NULL OR fhsa_opened_year BETWEEN 2023 AND 2100`),
   ],
 );
 
@@ -440,6 +459,87 @@ export const securityPreferences = pgTable(
     index("idx_security_preferences_security").on(t.securityId),
     index("idx_security_preferences_pool").on(t.poolSecurityId),
     check("security_preferences_dividend_class_check", inList("dividend_class", DIVIDEND_CLASSES)),
+  ],
+);
+
+/**
+ * Cash moved into or out of an account (SnapTrade `CONTRIBUTION`, `DEPOSIT`, `WITHDRAWAL`, and internal
+ * cash transfers), or a contribution the user entered for an account TaxBack cannot see (`manual`).
+ * Kept apart from `transactions`: it never touches ACB. A synced row follows its account's type at
+ * recompute time; a manual row names its own `plan`. `classification` is the user's override and a sync
+ * never overwrites it.
+ */
+export const contributionFlows = pgTable(
+  "contribution_flows",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: userRef(),
+    source: text("source", { enum: FLOW_SOURCES }).notNull(),
+    accountId: uuid("account_id"),
+    plan: text("plan", { enum: PLAN_TYPES }),
+    snaptradeActivityId: text("snaptrade_activity_id"),
+    /** The activity type SnapTrade reported; null for manual entries. */
+    brokerType: text("broker_type"),
+    flowDate: day("flow_date").notNull(),
+    direction: text("direction", { enum: FLOW_DIRECTIONS }).notNull(),
+    amount: money("amount").notNull(),
+    currency: text("currency").notNull(),
+    description: text("description"),
+    classification: text("classification", { enum: FLOW_CLASSIFICATIONS }),
+    /** Original SnapTrade activity. Never queried into. */
+    raw: jsonb("raw"),
+    createdAt: createdAt(),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    unique("contribution_flows_id_user_id_key").on(t.id, t.userId),
+    unique("contribution_flows_account_activity_key").on(t.accountId, t.snaptradeActivityId),
+    foreignKey({
+      name: "contribution_flows_account_fkey",
+      columns: [t.accountId, t.userId],
+      foreignColumns: [brokerageAccounts.id, brokerageAccounts.userId],
+    }).onDelete("cascade"),
+    index("idx_contribution_flows_user_date").on(t.userId, t.flowDate),
+    currencyCheck("contribution_flows_currency_check", "currency"),
+    check("contribution_flows_source_check", inList("source", FLOW_SOURCES)),
+    check("contribution_flows_direction_check", inList("direction", FLOW_DIRECTIONS)),
+    check("contribution_flows_plan_check", inList("plan", PLAN_TYPES)),
+    check("contribution_flows_classification_check", inList("classification", FLOW_CLASSIFICATIONS)),
+    check("contribution_flows_amount_check", sql`amount > 0`),
+    check(
+      "contribution_flows_source_fields_check",
+      sql`CASE WHEN source = 'snaptrade' THEN account_id IS NOT NULL AND snaptrade_activity_id IS NOT NULL AND plan IS NULL
+               ELSE account_id IS NULL AND snaptrade_activity_id IS NULL AND plan IS NOT NULL END`,
+    ),
+  ],
+);
+
+/**
+ * What CRA told the user about one plan and year (notice of assessment, FHSA room statement, CRA
+ * My Account), the RRSP estimate inputs, and the deduction they claim. Every field is optional.
+ */
+export const contributionInputs = pgTable(
+  "contribution_inputs",
+  {
+    userId: userRef(),
+    plan: text("plan", { enum: ROOM_PLANS }).notNull(),
+    taxYear: smallint("tax_year").notNull(),
+    officialRoomCad: money("official_room_cad"),
+    unusedCarriedForwardCad: money("unused_carried_forward_cad"),
+    earnedIncomePriorYearCad: money("earned_income_prior_year_cad"),
+    pensionAdjustmentCad: money("pension_adjustment_cad"),
+    /** Null claims the most allowed. */
+    deductionClaimedCad: money("deduction_claimed_cad"),
+    updatedAt: updatedAt(),
+  },
+  (t) => [
+    primaryKey({ name: "contribution_inputs_pkey", columns: [t.userId, t.plan, t.taxYear] }),
+    check("contribution_inputs_plan_check", inList("plan", ROOM_PLANS)),
+    check(
+      "contribution_inputs_amounts_check",
+      sql`coalesce(unused_carried_forward_cad, 0) >= 0 AND coalesce(earned_income_prior_year_cad, 0) >= 0
+          AND coalesce(pension_adjustment_cad, 0) >= 0 AND coalesce(deduction_claimed_cad, 0) >= 0`,
+    ),
   ],
 );
 
@@ -869,5 +969,84 @@ export const positionReconciliations = pgTable(
     index("idx_position_reconciliations_security").on(t.securityId),
     index("idx_position_reconciliations_account").on(t.accountId),
     check("position_reconciliations_status_check", inList("status", RECONCILIATION_STATUSES)),
+  ],
+);
+
+/** How each cash flow was read: contribution, withdrawal, or transfer, in CAD, and the tax year it counts for. */
+export const contributionFlowResults = pgTable(
+  "contribution_flow_results",
+  {
+    flowId: uuid("flow_id").primaryKey(),
+    userId: userRef(),
+    plan: text("plan", { enum: PLAN_TYPES }),
+    kind: text("kind", { enum: FLOW_KINDS }).notNull(),
+    taxYear: smallint("tax_year").notNull(),
+    amountCad: money("amount_cad").notNull(),
+    /** CAD per unit of the flow's currency; null for CAD. */
+    fxRate: ratio("fx_rate"),
+    /** The automatic reading is a guess the user should confirm. */
+    needsReview: boolean("needs_review").notNull().default(false),
+  },
+  (t) => [
+    foreignKey({
+      name: "contribution_flow_results_flow_fkey",
+      columns: [t.flowId, t.userId],
+      foreignColumns: [contributionFlows.id, contributionFlows.userId],
+    }).onDelete("cascade"),
+    index("idx_contribution_flow_results_user_year").on(t.userId, t.taxYear),
+    check("contribution_flow_results_plan_check", inList("plan", PLAN_TYPES)),
+    check("contribution_flow_results_kind_check", inList("kind", FLOW_KINDS)),
+  ],
+);
+
+/**
+ * One plan's year: room, contributions, the overcontribution tax estimate, and for RRSP and FHSA the
+ * Schedule 7 and Schedule 15 amounts. Plan-specific columns are null for the other plans.
+ */
+export const contributionSummaries = pgTable(
+  "contribution_summaries",
+  {
+    userId: userRef(),
+    plan: text("plan", { enum: PLAN_TYPES }).notNull(),
+    taxYear: smallint("tax_year").notNull(),
+    /** Null for plans without room tracking. */
+    roomSource: text("room_source", { enum: ROOM_SOURCES }),
+    estimateIncomplete: boolean("estimate_incomplete").notNull().default(false),
+    limitAssumed: boolean("limit_assumed").notNull().default(false),
+    contributionsCad: money("contributions_cad").notNull(),
+    withdrawalsCad: money("withdrawals_cad").notNull(),
+    peakExcessCad: money("peak_excess_cad").notNull().default("0"),
+    penaltyCad: money("penalty_cad").notNull().default("0"),
+    /** TFSA: room on January 1 (negative when an excess carried over). */
+    openingRoomCad: money("opening_room_cad"),
+    /** TFSA and FHSA: room left. */
+    roomRemainingCad: money("room_remaining_cad"),
+    /** TFSA: withdrawals added back to room next January. */
+    restoredNextYearCad: money("restored_next_year_cad"),
+    /** RRSP and FHSA: unused contributions from earlier years. */
+    unusedFromPriorCad: money("unused_from_prior_cad"),
+    /** RRSP: Schedule 7 lines 2 and 3. */
+    periodOneCad: money("period_one_cad"),
+    periodTwoCad: money("period_two_cad"),
+    /** RRSP: the last day a contribution counts for this year. */
+    deadline: day("deadline"),
+    deductionLimitCad: money("deduction_limit_cad"),
+    maxDeductionCad: money("max_deduction_cad"),
+    deductionCad: money("deduction_cad"),
+    carryForwardCad: money("carry_forward_cad"),
+    /** RRSP: limit - deduction, carried into next year's room. */
+    unusedRoomCad: money("unused_room_cad"),
+    /** FHSA. */
+    firstYear: boolean("first_year").notNull().default(false),
+    participationRoomCad: money("participation_room_cad"),
+    carryforwardInCad: money("carryforward_in_cad"),
+    rrspTransfersCad: money("rrsp_transfers_cad"),
+    annualLimitCad: money("annual_limit_cad"),
+    lifetimeUsedCad: money("lifetime_used_cad"),
+  },
+  (t) => [
+    primaryKey({ name: "contribution_summaries_pkey", columns: [t.userId, t.plan, t.taxYear] }),
+    check("contribution_summaries_plan_check", inList("plan", PLAN_TYPES)),
+    check("contribution_summaries_room_source_check", inList("room_source", ROOM_SOURCES)),
   ],
 );

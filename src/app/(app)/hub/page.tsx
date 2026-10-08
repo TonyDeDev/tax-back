@@ -18,7 +18,7 @@ import { SyncControls } from "@/components/sync/sync-controls";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
-import { formatAgo, formatPercent, formatQuantity, formatShortDate } from "@/lib/format";
+import { formatAgo, formatMoney, formatPercent, formatQuantity, formatShortDate } from "@/lib/format";
 import { type AttentionItem, warningAttention } from "@/lib/warnings";
 import { hasSnapTradeGrant } from "@/server/auth/accounts";
 import { configuredProviders } from "@/server/auth/config";
@@ -28,6 +28,7 @@ import { SNAPTRADE_DASHBOARD_URL } from "@/server/auth/snaptrade-provider";
 import { getDb } from "@/server/db";
 import { ensureDemoSeeded } from "@/server/demo/seed";
 import { getEnv } from "@/server/env";
+import { type ContributionAlert, getContributionAlerts } from "@/server/queries/contributions";
 import {
   type HubBrokerage,
   type HubPendingBrokerage,
@@ -98,7 +99,12 @@ function SyncProblem({ sync }: { sync: HubSync }) {
 }
 
 /** Every item the "Needs attention" card lists; the Alerts count is its length. */
-function attentionItems(summary: HubSummary, reconciliation: ReconciliationSummary, hidden: boolean): AttentionItem[] {
+function attentionItems(
+  summary: HubSummary,
+  reconciliation: ReconciliationSummary,
+  contributionAlerts: ContributionAlert[],
+  hidden: boolean,
+): AttentionItem[] {
   const broken = [...summary.brokerages, ...summary.pendingBrokerages].filter((b) => b.status === "broken");
   return [
     ...broken.map((b) => ({
@@ -123,6 +129,12 @@ function attentionItems(summary: HubSummary, reconciliation: ReconciliationSumma
       text: `${g.symbol}: ledger ${formatQuantity(g.ledgerQuantity)}, broker ${formatQuantity(g.brokerQuantity)} units`,
       href: `/hub/securities/${g.securityId}${g.status === "broker_has_more" ? "#opening" : "#reconciliation"}`,
       linkLabel: g.status === "broker_has_more" ? "Add opening balance" : "Review",
+    })),
+    ...contributionAlerts.map((a) => ({
+      tone: "negative" as const,
+      text: `${ACCOUNT_TYPE_LABELS[a.plan]} over the limit by ${formatMoney(a.peakExcessCad, "CAD", { hidden })}, taxed 1% a month`,
+      href: `/contributions/${a.taxYear}#${a.plan}`,
+      linkLabel: "Review",
     })),
     ...summary.warnings.map((w) => warningAttention(w, hidden)),
   ];
@@ -306,9 +318,14 @@ export default async function Hub(props: PageProps<"/hub">) {
     }
   }
   const hasData = demoReady || lastSync !== null;
-  const [summary, lastSuccessAt, reconciliation] = hasData
-    ? await Promise.all([getHubSummary(db, user.id, today), getLastSuccessfulSyncAt(db, user.id), getReconciliation(db, user.id, today)])
-    : [null, null, null];
+  const [summary, lastSuccessAt, reconciliation, contributionAlerts] = hasData
+    ? await Promise.all([
+        getHubSummary(db, user.id, today),
+        getLastSuccessfulSyncAt(db, user.id),
+        getReconciliation(db, user.id, today),
+        getContributionAlerts(db, user.id, year),
+      ])
+    : [null, null, null, []];
 
   const selected = summary?.brokerages.find((b) => b.id === first(params.brokerage)) ?? null;
   const shown = selected ? [selected] : (summary?.brokerages ?? []);
@@ -353,7 +370,7 @@ export default async function Hub(props: PageProps<"/hub">) {
   const totalCad = selected ? selected.totalCad : summary.totalValueCad;
   const totalIncomplete = selected ? selected.totalIncomplete : summary.totalIncomplete;
   const change = latestChange(history);
-  const attention = attentionItems(summary, reconciliation, hidden);
+  const attention = attentionItems(summary, reconciliation, contributionAlerts, hidden);
   const needAction = attention.filter((a) => a.tone === "negative").length;
   const weightOf = (value: string | null) =>
     value === null || new D(totalCad).isZero() ? null : new D(value).div(totalCad).toFixed(6);

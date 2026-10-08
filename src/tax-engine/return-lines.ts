@@ -6,7 +6,7 @@ import { ZERO, type Dec } from "./decimal";
  * realized gains. Nothing here recomputes tax; it sums by Schedule 3 period and maps totals to lines.
  */
 
-export type ReturnForm = "Schedule 3" | "T1" | "Schedule 1" | "T2209";
+export type ReturnForm = "Schedule 3" | "T1" | "Schedule 1" | "T2209" | "Schedule 7" | "Schedule 15";
 
 export interface ReturnLine {
   key: string;

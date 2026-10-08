@@ -143,6 +143,7 @@ const snaptrade = {
     ],
     "acc-tfsa": [
       act("tfsa-buy", { type: "BUY", units: 5, price: 31, amount: -155, settlement_date: "2026-03-10T15:00:00Z", trade_date: "2026-03-10T15:00:00Z" }),
+      act("tfsa-dep", { symbol: null, type: "CONTRIBUTION", amount: 500, settlement_date: null, trade_date: "2026-03-09T15:00:00Z" }),
     ],
   } as Record<string, unknown[]>,
   positions: {
@@ -298,7 +299,20 @@ describe("syncUser", () => {
 
     const [run] = await db.select().from(s.syncRuns).where(eq(s.syncRuns.userId, A));
     expect(run).toMatchObject({ status: "succeeded", trigger: "connect" });
-    expect(run!.stats).toMatchObject({ accounts: 4, transactions: 5, holdings: 3, skipped: { CONTRIBUTION: 1, "position:unreported": 1 } });
+    expect(run!.stats).toMatchObject({ accounts: 4, transactions: 5, holdings: 3, cashFlows: 2, skipped: { "position:unreported": 1 } });
+
+    // Cash deposits are kept: the TFSA one is a contribution, the non-registered one counts for nothing.
+    const flows = await db
+      .select({ id: s.contributionFlows.snaptradeActivityId, kind: s.contributionFlowResults.kind, plan: s.contributionFlowResults.plan })
+      .from(s.contributionFlows)
+      .innerJoin(s.contributionFlowResults, eq(s.contributionFlowResults.flowId, s.contributionFlows.id))
+      .where(eq(s.contributionFlows.userId, A));
+    expect(flows.sort((a, b) => a.id!.localeCompare(b.id!))).toEqual([
+      { id: "nr-dep", kind: "ignored", plan: null },
+      { id: "tfsa-dep", kind: "contribution", plan: "tfsa" },
+    ]);
+    const [tfsaYear] = await db.select().from(s.contributionSummaries).where(eq(s.contributionSummaries.userId, A));
+    expect(tfsaYear).toMatchObject({ plan: "tfsa", taxYear: 2026, contributionsCad: "500.000000", roomSource: "unknown" });
     const [profile] = await db.select().from(s.userProfiles).where(eq(s.userProfiles.userId, A));
     expect(profile!.lastSyncedAt).not.toBeNull();
     expect(profile!.lastRecomputedAt).not.toBeNull();
