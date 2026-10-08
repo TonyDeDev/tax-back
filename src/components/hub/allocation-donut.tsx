@@ -50,8 +50,23 @@ export function AllocationDonut({ slices, totalCad }: AllocationDonutProps) {
               <rect width="6" height="6" fill="var(--card)" />
               <line x1="0" y1="0" x2="0" y2="6" stroke="var(--chart-hatch)" strokeWidth="2.5" />
             </pattern>
+            {/* One ring reveals every slice together, sweeping clockwise from 12 o'clock (800ms). */}
+            <mask id="allocation-sweep" maskUnits="userSpaceOnUse">
+              <circle
+                cx={SIZE / 2}
+                cy={SIZE / 2}
+                r={RADIUS}
+                fill="none"
+                stroke="white"
+                strokeWidth={STROKE + 2}
+                pathLength={100}
+                strokeDasharray={100}
+                className="animate-sweep"
+              />
+            </mask>
           </defs>
           <circle cx={SIZE / 2} cy={SIZE / 2} r={RADIUS} fill="none" stroke="var(--muted)" strokeWidth={STROKE} />
+          <g mask="url(#allocation-sweep)">
           {arcs.map(({ slice: s, length, offset }) => {
             const dash = Math.max(length - gap, 0.5);
             return (
@@ -68,6 +83,7 @@ export function AllocationDonut({ slices, totalCad }: AllocationDonutProps) {
               />
             );
           })}
+          </g>
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
           <span className="text-caption text-muted-foreground">Total</span>

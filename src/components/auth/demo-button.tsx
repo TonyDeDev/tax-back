@@ -1,9 +1,9 @@
 "use client";
 
-import { Loader2 } from "lucide-react";
+import { ArrowRight, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Button, type ButtonProps } from "@/components/ui/button";
+import { Button, buttonArrowClass, type ButtonProps } from "@/components/ui/button";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
 
@@ -33,6 +33,7 @@ export function DemoButton({ className, size, variant, children = "Try the demo"
       <Button size={size} variant={variant} className="w-full" onClick={start} disabled={pending} aria-busy={pending}>
         {pending && <Loader2 aria-hidden className="size-4 animate-spin" />}
         {children}
+        {!pending && <ArrowRight aria-hidden className={buttonArrowClass} />}
       </Button>
       {error && (
         <p role="alert" className="text-caption text-negative">

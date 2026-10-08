@@ -44,7 +44,7 @@ Four defects found by reading the engine, each reproduced as a failing test befo
 
 - Red Hat fonts, `theme.css` tokens, and next-themes (system default, manual toggle).
 - App shell: sidebar on desktop, top bar and bottom nav on phones.
-- Shared components: Button, Card, Badge, Money, PageHeader, StatCard, EmptyState, DemoBadge.
+- Shared components: Button, Card, Badge, Money, PageHeader, StatCard, EmptyState, DisclaimerStrip.
 - Placeholder pages for landing, sign-in, Hub, account detail, security detail, Tax Center, and Settings.
 - Checked in dark and light at desktop and 390px width with no horizontal scroll.
 

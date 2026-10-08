@@ -4,7 +4,7 @@ export type StatusTone = "positive" | "negative" | "neutral";
 
 interface StatusDotProps {
   tone: StatusTone;
-  /** Pulses while something is in progress, such as a sync. Static under `prefers-reduced-motion`. */
+  /** Pulses (opacity 1 to 0.4, 1.4s) while something is in progress, such as a sync. Static under `prefers-reduced-motion`. */
   pulse?: boolean;
   className?: string;
 }
@@ -19,7 +19,7 @@ export function StatusDot({ tone, pulse = false, className }: StatusDotProps) {
         tone === "positive" && "bg-positive",
         tone === "negative" && "bg-negative",
         tone === "neutral" && "bg-chart-3",
-        pulse && "motion-safe:animate-pulse",
+        pulse && "animate-status-pulse",
         className,
       )}
     />

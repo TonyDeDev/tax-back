@@ -1,6 +1,12 @@
 import type { HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
+/**
+ * A clickable card or row moves one step up the surface ladder on hover (Graphite to Obsidian) with a
+ * lighter border. No movement and no shadow.
+ */
+export const interactiveSurfaceClass = "transition-motion hover:border-border-strong hover:bg-surface-hover";
+
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return <div className={cn("rounded-md border bg-card text-card-foreground shadow-subtle", className)} {...props} />;
 }

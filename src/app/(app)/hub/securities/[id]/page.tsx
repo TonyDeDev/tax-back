@@ -123,7 +123,7 @@ function AuditTrail({ steps }: { steps: AuditStep[] }) {
                   <span className="text-body-sm font-medium tabular-nums"><Money value={step.poolAcbAfterCad} /></span>
                   <span className="text-caption text-muted-foreground tabular-nums">{formatQuantity(step.poolQuantityAfter)} units</span>
                 </span>
-                <ChevronDown aria-hidden className="hidden size-4 text-muted-foreground transition-transform group-open:rotate-180 sm:block" />
+                <ChevronDown aria-hidden className="hidden size-4 text-muted-foreground transition-transform duration-(--motion-base) ease-in-out group-open:rotate-180 motion-reduce:transition-none sm:block" />
               </summary>
               <div className="flex flex-col gap-3 border-t bg-muted/30 px-4 py-3">
                 <p className="text-body-sm">{text.rule}</p>
@@ -207,7 +207,7 @@ function Section({ title, description, collapsed, children }: { title: string; d
         <summary className="cursor-pointer list-none rounded-md hover:bg-accent/50 [&::-webkit-details-marker]:hidden">
           <CardHeader className="flex-row items-start justify-between gap-4">
             <span className="flex flex-col gap-1">{header}</span>
-            <ChevronDown aria-hidden className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-180" />
+            <ChevronDown aria-hidden className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform duration-(--motion-base) ease-in-out group-open:rotate-180 motion-reduce:transition-none" />
           </CardHeader>
         </summary>
         <CardContent>{children}</CardContent>

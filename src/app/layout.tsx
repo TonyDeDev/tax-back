@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { headers } from "next/headers";
 import { Red_Hat_Display, Red_Hat_Mono, Red_Hat_Text } from "next/font/google";
-import { DemoBadge } from "@/components/demo-badge";
+import { DisclaimerStrip } from "@/components/disclaimer-strip";
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
@@ -25,8 +25,8 @@ export default async function RootLayout({ children }: LayoutProps<"/">) {
     >
       <body className="flex min-h-full flex-col">
         <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange nonce={nonce}>
-          <DemoBadge />
           <div className="flex flex-1 flex-col">{children}</div>
+          <DisclaimerStrip />
         </ThemeProvider>
       </body>
     </html>

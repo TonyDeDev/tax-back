@@ -4,6 +4,12 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 import { DemoButton } from "@/components/auth/demo-button";
 import { Brand } from "@/components/brand";
+import { GithubIcon } from "@/components/icons/brand-icons";
+import { CandleField } from "@/components/landing/candle-field";
+import { OpenSourceSection } from "@/components/landing/open-source-section";
+import { ContactRow, TeamCard } from "@/components/landing/team-card";
+import { REPO_PATH, REPO_URL, linkRows, team } from "@/components/landing/team";
+import { Reveal } from "@/components/motion/reveal";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Tag } from "@/components/ui/tag";
@@ -59,21 +65,17 @@ const AUDIT_ROWS = [
 ] as const;
 
 /**
- * LinkedIn profiles, shown on the cards when set. A null profile renders the name as plain text
- * rather than a dead link, so the page stays honest until the real URL is filled in.
+ * DESIGN.md separates sections with a hairline rather than spacing alone. Each section below the hero
+ * fades up once as it scrolls into view, and its hairline draws in from the left.
  */
-const TEAM: { name: string; linkedin: string }[] = [
-  { name: "Phuntsho Wangyal Galay", linkedin: "https://www.linkedin.com/in/phuntsho-wangyal" },
-  { name: "Tony Pham", linkedin: "https://www.linkedin.com/in/tonypham06" },
-  { name: "Michael Toner", linkedin: "https://www.linkedin.com/in/michael-toner-data-driven-process-improvement/" },
-];
-
-/** DESIGN.md separates sections with a hairline rather than spacing alone. */
 function Section({ children, label }: { children: ReactNode; label?: string }) {
   return (
-    <section aria-labelledby={label} className="border-t py-12 first:border-t-0 first:pt-0 md:py-16 md:first:pt-0">
-      {children}
-    </section>
+    <Reveal>
+      <section aria-labelledby={label} className="relative py-12 md:py-16">
+        <span data-hairline aria-hidden className="absolute inset-x-0 top-0 h-px bg-border" />
+        {children}
+      </section>
+    </Reveal>
   );
 }
 
@@ -159,12 +161,12 @@ function AuditTrail() {
 
 function Hero() {
   return (
-    <Section>
-      <div className="flex flex-col gap-10">
+    <section className="flex flex-col gap-10 pb-12 md:pb-16">
+      <div className="grid items-center gap-8 lg:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)] lg:gap-6">
         <div className="flex flex-col gap-6">
           <Tag className="self-start">Free concept demo · Canada only</Tag>
           <div className="flex max-w-3xl flex-col gap-4">
-            <h1 className="font-display text-heading font-bold md:text-heading-lg lg:text-display">
+            <h1 className="font-display text-heading font-bold md:text-heading-lg xl:text-display">
               All your brokerages. One Canadian tax picture.
             </h1>
             <p className="max-w-xl text-body text-muted-foreground">
@@ -182,10 +184,12 @@ function Hero() {
             The demo is a full seeded portfolio. No account, no brokerage, nothing to install.
           </p>
         </div>
-        {/* The product sits directly under the hero as the visual proof, per DESIGN.md's layout. */}
-        <AuditTrail />
+        {/* Fixed heights, so the field never shifts the layout while it draws in. */}
+        <CandleField className="-mx-4 h-48 sm:h-64 md:-mx-8 lg:mx-0 lg:h-[26rem]" />
       </div>
-    </Section>
+      {/* The product sits directly under the hero as the visual proof, per DESIGN.md's layout. */}
+      <AuditTrail />
+    </section>
   );
 }
 
@@ -210,8 +214,7 @@ function Features() {
       <div className="flex flex-col gap-8">
         <SectionHeading id="what-it-does" title="What a single broker cannot tell you">
           <p className="text-body text-muted-foreground">
-            Every number records the rule it applied and the Bank of Canada rate it used, so you can check any figure
-            against your own statements before you file.
+            Every number records the rule it applied and the Bank of Canada rate it used.
           </p>
         </SectionHeading>
         <ul className="grid gap-4 md:grid-cols-3">
@@ -232,36 +235,35 @@ function Features() {
   );
 }
 
-function Team() {
+function OpenSource() {
   return (
-    <Section label="team">
-      <div className="flex flex-col gap-10">
-        <div className="flex max-w-3xl flex-col gap-4">
-          <Tag className="self-start">Contact</Tag>
-          <h2 id="team" className="font-display text-heading font-bold md:text-heading-lg">
-            Know what you actually owe.
+    <Section label="open-source">
+      <OpenSourceSection />
+    </Section>
+  );
+}
+
+function Contact() {
+  return (
+    <Section label="contact">
+      <div className="flex flex-col gap-8">
+        <div className="relative flex flex-col gap-3 pb-6">
+          <span data-hairline aria-hidden className="absolute inset-x-0 bottom-0 h-px bg-border" />
+          <h2 id="contact" className="font-display text-heading-sm font-medium md:text-heading">
+            Contact
           </h2>
-          <p className="text-body text-muted-foreground">
-            Meet the team behind TaxBack. Say hello on LinkedIn.
-          </p>
+          <p className="text-body text-muted-foreground">The people behind TaxBack. Say hello, or read the code.</p>
         </div>
-        <ul className="grid gap-px overflow-hidden rounded-md border bg-border sm:grid-cols-2 md:grid-cols-3">
-          {TEAM.map(({ name, linkedin }) => (
-            <li key={name} className="flex flex-col gap-4 bg-card p-6">
-              <span className="font-display text-heading-sm font-semibold">{name}</span>
-              {/* The link sits on its own line, so the name stays readable and the action is explicit. */}
-              <a
-                href={linkedin}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="mt-auto inline-flex w-fit items-center gap-1 text-body-sm font-medium text-link hover:underline"
-              >
-                LinkedIn
-                <ArrowUpRight aria-hidden className="size-4 shrink-0" />
-              </a>
+        <ul className="reveal-stagger grid gap-4 [--motion-stagger:60ms] md:grid-cols-3">
+          {team.map((member) => (
+            <li key={member.name}>
+              <TeamCard member={member} rows={linkRows(member.links)} />
             </li>
           ))}
         </ul>
+        <div className="max-w-md">
+          <ContactRow row={{ kind: "github", label: "Source code", href: REPO_URL, value: REPO_PATH }} />
+        </div>
       </div>
     </Section>
   );
@@ -275,19 +277,27 @@ export default function Landing() {
         <Hero />
         <Rules />
         <Features />
-        <Team />
+        <OpenSource />
+        <Contact />
       </main>
       <footer className="border-t bg-card">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-8 md:flex-row md:items-start md:justify-between md:px-8">
           <div className="flex flex-col gap-2">
             <Brand />
-            <p className="max-w-md text-caption text-muted-foreground">
-              A free working concept for Canadian investors. Not tax advice, and not a commercial product. Check every
-              number with a professional before you file.
-            </p>
+            <p className="max-w-md text-caption text-muted-foreground">A free working concept for Canadian investors.</p>
           </div>
-          <div className="flex flex-col gap-1 text-caption text-muted-foreground md:items-end">
-            <span>Figures shown are illustrative.</span>
+          <div className="flex flex-col gap-2 text-caption text-muted-foreground md:items-end">
+            <a
+              href={REPO_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group/link inline-flex w-fit items-center gap-1.5 rounded-sm transition-motion hover:text-foreground"
+            >
+              <GithubIcon aria-hidden className="size-3.5" />
+              GitHub
+              <ArrowUpRight aria-hidden className="size-3.5 transition-motion motion-safe:group-hover/link:translate-x-0.5" />
+              <span className="sr-only">(opens in a new tab)</span>
+            </a>
             <span>CRA rules · Canada only</span>
           </div>
         </div>

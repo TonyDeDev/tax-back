@@ -2,14 +2,19 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { ActiveIndicator } from "@/components/motion/active-indicator";
 import { cn } from "@/lib/utils";
 import { NAV_ITEMS, isActive } from "./nav-items";
 
 export function BottomNav() {
   const pathname = usePathname();
   return (
-    <nav aria-label="Main" className="fixed inset-x-0 bottom-0 z-10 border-t bg-card lg:hidden">
-      <ul className="grid grid-cols-4">
+    <nav
+      aria-label="Main"
+      data-bottom-nav
+      className="fixed inset-x-0 bottom-0 z-10 h-(--bottom-nav-h) border-t bg-card lg:hidden"
+    >
+      <ul data-indicator-group className="isolate grid h-full grid-cols-4">
         {NAV_ITEMS.map((item) => {
           const active = isActive(pathname, item);
           return (
@@ -18,11 +23,13 @@ export function BottomNav() {
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={cn(
-                  "flex flex-col items-center gap-1 py-2 text-caption font-medium",
+                  "relative flex h-full flex-col items-center justify-center gap-1 text-caption font-medium transition-motion",
                   active ? "text-foreground" : "text-muted-foreground",
                 )}
               >
-                <item.icon aria-hidden className={cn("size-5", active && "text-primary")} />
+                {/* A hairline on top of the active tab slides between tabs. */}
+                {active && <ActiveIndicator group="bottom-nav" className="bottom-auto h-0.5 bg-primary" />}
+                <item.icon aria-hidden className={cn("size-5 transition-motion", active && "text-primary")} />
                 {item.shortLabel ?? item.label}
               </Link>
             </li>

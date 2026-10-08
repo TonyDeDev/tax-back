@@ -82,14 +82,15 @@ function Readiness({ view }: { view: TaxYearView }) {
           </ul>
         </>
       )}
-      <p className="flex items-start gap-2 text-caption text-muted-foreground">
-        <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
-        <span>
-          {t3Symbols.length > 0 &&
-            `For ${listFormat.format(t3Symbols)}, use your T3 ${t3Symbols.length === 1 ? "slip" : "slips"} instead: a Canadian ETF's distribution mixes dividends, capital gains, and return of capital, and only the T3 has the split. `}
-          Compare the dividend lines with your T5 and T3 slips before you file.
-        </span>
-      </p>
+      {t3Symbols.length > 0 && (
+        <p className="flex items-start gap-2 text-caption text-muted-foreground">
+          <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            For {listFormat.format(t3Symbols)}, use your T3 {t3Symbols.length === 1 ? "slip" : "slips"} instead: a Canadian
+            ETF&apos;s distribution mixes dividends, capital gains, and return of capital, and only the T3 has the split.
+          </span>
+        </p>
+      )}
     </div>
   );
 }

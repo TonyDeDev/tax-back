@@ -102,6 +102,25 @@ Each `text-*` class sets size, line height, and letter spacing together (see `th
 |------|-------|-------|
 | subtle | `rgba(255, 255, 255, 0.06) 0px 1px 0px 0px inset` | `--shadow-subtle` |
 
+### Motion
+
+Smooth and quiet: things fade and slide a few pixels, never bounce or overshoot.
+The tokens live in `theme.css`, and the helpers live in `src/components/motion/`.
+
+| Name | Value | Use |
+|------|-------|-----|
+| `--motion-fast` | 120ms | Hover colors, borders, tooltips, arrow nudges |
+| `--motion-base` | 200ms | Menus, indicators sliding between tabs, row reordering |
+| `--motion-slow` | 400ms | Page and section entrances, the disclaimer strip |
+| `--ease-out` | `cubic-bezier(0.16, 1, 0.3, 1)` | Entrances |
+| `--ease-in-out` | `cubic-bezier(0.65, 0, 0.35, 1)` | State changes |
+
+- Animate only `transform`, `opacity`, `color`, and `border-color`; never width, height, or layout properties.
+- Entrances fade up 8px. Pages stagger their blocks 40ms apart, and stop staggering after the sixth.
+- Hover lifts a border from Basalt to Pewter, and a card's surface one step up the ladder. Nothing moves except a 2px arrow nudge, and buttons scale to 0.98 when pressed.
+- Signal Green may appear in motion only as a small, transient accent, such as the hero spotlight.
+- With `prefers-reduced-motion`, only short opacity fades remain: no transforms, counters, or drifting.
+
 ### Layout
 
 - **Page max-width:** 1200px
@@ -125,6 +144,11 @@ Transparent background, 1px border in Basalt (#2b292d), text in Ash (#eeeef0) we
 **Role:** Sign in and utility nav buttons in the header
 
 Subtle dark fill in Obsidian (#1a191b), 1px border in Basalt (#2b292d), text in Ash (#eeeef0) at 14px weight 500, 6px radius, 8px 16px padding. Barely visible - designed to recede so the CTA 'Get started' dominates.
+
+### Bottom Disclaimer Strip
+**Role:** The one disclaimer in TaxBack ("Concept demo - not tax advice"), fixed to the bottom of the viewport
+
+Slim full-width strip in Carbon (#04040b) with a 1px top border in Moss Border (#2d5736), 12px Red Hat Text in the muted text token, and a small close icon. Dismissal is remembered. It sits above the phone bottom nav, and pages reserve its height so it never covers content.
 
 ### Top Notification Banner
 **Role:** Site-wide announcement bar (e.g. new product launches)

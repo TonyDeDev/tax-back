@@ -3,8 +3,10 @@
 import { ArrowDown, ArrowUp, ChevronsUpDown, TableProperties } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
+import { ActiveIndicator } from "@/components/motion/active-indicator";
+import { useFlip } from "@/components/motion/use-flip";
 import { Money } from "@/components/money";
 import { useAmountsHidden } from "@/components/amounts";
 import { formatMoney, formatPercent, formatQuantity } from "@/lib/format";
@@ -81,7 +83,7 @@ function SortHeader<K extends string>({
     <th
       scope="col"
       aria-sort={active ? (sort.desc ? "descending" : "ascending") : undefined}
-      className={cn("sticky top-8 z-[1] border-b bg-card px-2 py-2 xl:px-3 font-medium", align === "right" ? "text-right" : "text-left", className)}
+      className={cn("sticky top-0 z-[1] border-b bg-card px-2 py-2 xl:px-3 font-medium", align === "right" ? "text-right" : "text-left", className)}
     >
       {/* Inline, so a label that wraps keeps its sort icon right after the last word. */}
       <button
@@ -101,7 +103,7 @@ function SortHeader<K extends string>({
 
 function PlainHeader({ label, className }: { label: string; className?: string }) {
   return (
-    <th scope="col" className={cn("sticky top-8 z-[1] border-b bg-card px-2 py-2 xl:px-3 text-right font-medium", className)}>
+    <th scope="col" className={cn("sticky top-0 z-[1] border-b bg-card px-2 py-2 xl:px-3 text-right font-medium", className)}>
       {label}
     </th>
   );
@@ -135,7 +137,8 @@ function SecurityCell({ symbol, name, securityId }: { symbol: string; name: stri
   );
 }
 
-const rowClass = "cursor-pointer border-b transition-colors last:border-0 hover:bg-muted";
+/** Row hover is instant; only a re-sort moves rows (FLIP, 200ms). */
+const rowClass = "cursor-pointer border-b last:border-0 hover:bg-muted";
 const cell = "px-2 py-2.5 xl:px-3 text-right font-mono";
 
 function PooledTable({ rows }: { rows: PooledHolding[] }) {
@@ -144,6 +147,8 @@ function PooledTable({ rows }: { rows: PooledHolding[] }) {
   const [sort, setSort] = useState<Sort<PooledKey>>({ key: "marketValueCad", desc: true });
   const onSort = (key: PooledKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== "symbol" }));
   const sorted = sortRows(rows, sort, ["symbol"]);
+  const body = useRef<HTMLTableSectionElement>(null);
+  useFlip(body, sort);
   return (
     <table className="hidden w-full text-body-sm tabular-nums md:table">
       <thead className="text-caption text-muted-foreground">
@@ -158,9 +163,9 @@ function PooledTable({ rows }: { rows: PooledHolding[] }) {
           <SortHeader label="Unrealized" column="unrealizedCad" sort={sort} onSort={onSort} />
         </tr>
       </thead>
-      <tbody>
+      <tbody ref={body}>
         {sorted.map((r) => (
-          <tr key={r.securityId} className={rowClass} onClick={() => router.push(auditHref(r.securityId))}>
+          <tr key={r.securityId} data-flip-key={r.securityId} className={rowClass} onClick={() => router.push(auditHref(r.securityId))}>
             <td className="px-2 py-2.5 xl:px-3">
               <SecurityCell symbol={r.symbol} name={r.name} securityId={r.securityId} />
             </td>
@@ -198,6 +203,8 @@ function AccountTable({ rows }: { rows: AccountHolding[] }) {
   const onSort = (key: AccountKey) =>
     setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key === "quantity" || key === "marketValueCad" }));
   const sorted = sortRows(rows, sort, ["symbol", "accountName", "accountTypeLabel"]);
+  const body = useRef<HTMLTableSectionElement>(null);
+  useFlip(body, sort);
   return (
     <table className="hidden w-full text-body-sm tabular-nums md:table">
       <thead className="text-caption text-muted-foreground">
@@ -210,9 +217,14 @@ function AccountTable({ rows }: { rows: AccountHolding[] }) {
           <PlainHeader label="Weight" className="hidden xl:table-cell" />
         </tr>
       </thead>
-      <tbody>
+      <tbody ref={body}>
         {sorted.map((r) => (
-          <tr key={`${r.accountId}|${r.securityId}|${r.symbol}`} className={rowClass} onClick={() => router.push(auditHref(r.securityId))}>
+          <tr
+            key={`${r.accountId}|${r.securityId}|${r.symbol}`}
+            data-flip-key={`${r.accountId}|${r.securityId}|${r.symbol}`}
+            className={rowClass}
+            onClick={() => router.push(auditHref(r.securityId))}
+          >
             <td className="px-2 py-2.5 xl:px-3">
               <SecurityCell symbol={r.symbol} name={r.name} securityId={r.securityId} />
             </td>
@@ -275,7 +287,12 @@ export function HoldingsTable({ pooled, byAccount, aside }: HoldingsTableProps) 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div role="group" aria-label="Group investments" className="flex w-fit rounded-md border p-0.5">
+        <div
+          role="group"
+          aria-label="Group investments"
+          data-indicator-group
+          className="isolate flex w-fit rounded-md border p-0.5"
+        >
           {(
             [
               ["pooled", "Pooled"],
@@ -288,10 +305,11 @@ export function HoldingsTable({ pooled, byAccount, aside }: HoldingsTableProps) 
               aria-pressed={view === value}
               onClick={() => setView(value)}
               className={cn(
-                "h-7 rounded-sm px-3 text-caption font-medium whitespace-nowrap transition-colors",
-                view === value ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground",
+                "relative h-7 rounded-sm px-3 text-caption font-medium whitespace-nowrap transition-motion",
+                view === value ? "text-foreground" : "text-muted-foreground hover:text-foreground",
               )}
             >
+              {view === value && <ActiveIndicator group="holdings-view" className="rounded-sm bg-accent" />}
               {label}
             </button>
           ))}

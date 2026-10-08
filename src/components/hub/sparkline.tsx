@@ -17,7 +17,18 @@ export function Sparkline({ values, label, width = 72, height = 24 }: SparklineP
   const points = numbers.map((v, i) => `${(i * step).toFixed(1)},${(height - 2 - ((v - min) / span) * (height - 4)).toFixed(1)}`).join(" ");
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} role="img" aria-label={label} className="text-muted-foreground">
-      <polyline points={points} fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinejoin="round" strokeLinecap="round" />
+      {/* Draws in from the left once (800ms); pathLength 1 makes the dash math independent of the shape. */}
+      <polyline
+        points={points}
+        pathLength={1}
+        strokeDasharray={1}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        strokeLinejoin="round"
+        strokeLinecap="round"
+        className="animate-draw-stroke"
+      />
     </svg>
   );
 }

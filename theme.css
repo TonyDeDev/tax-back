@@ -75,6 +75,100 @@
   --shadow-subtle: rgba(255, 255, 255, 0.06) 0px 1px 0px 0px inset;
 }
 
+@theme static {
+  /*
+   * Motion. Entrances ease out, state changes ease in and out, nothing bounces or overshoots.
+   * Only transform, opacity, color and border-color animate; never width, height or layout.
+   * Reduced motion swaps every transform animation for a short fade (src/app/globals.css).
+   * `static`, so every token is emitted even when only CSS (not a utility class) refers to it.
+   */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+
+  --animate-fade-up: fade-up var(--motion-slow) var(--ease-out) backwards;
+  --animate-fade-in: fade-in var(--motion-fast) var(--ease-out) backwards;
+  --animate-pop-in: pop-in var(--motion-base) var(--ease-out) backwards;
+  --animate-draw-x: draw-x 800ms var(--ease-out) backwards;
+  --animate-draw-stroke: draw-stroke 800ms var(--ease-out) backwards;
+  --animate-sweep: sweep 800ms var(--ease-out) backwards;
+  --animate-strip-in: strip-in var(--motion-slow) var(--ease-out) backwards;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-status-pulse: status-pulse 1.4s var(--ease-in-out) infinite;
+  --animate-value-flash: value-flash 300ms var(--ease-out);
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.98);
+  }
+}
+@keyframes draw-x {
+  from {
+    transform: scaleX(0);
+  }
+}
+/* For a path with pathLength="1" and stroke-dasharray="1". */
+@keyframes draw-stroke {
+  from {
+    stroke-dashoffset: 1;
+  }
+}
+/* For a ring with pathLength="100" and stroke-dasharray="100": sweeps clockwise from 12 o'clock. */
+@keyframes sweep {
+  from {
+    stroke-dashoffset: 100;
+  }
+}
+@keyframes strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@keyframes shimmer {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+@keyframes status-pulse {
+  50% {
+    opacity: 0.4;
+  }
+}
+/* A changed gain or loss starts at full foreground, then settles into its own tone. */
+@keyframes value-flash {
+  from {
+    color: var(--foreground);
+  }
+}
+
+/* Motion durations, shared by CSS and the client components that read them. */
+:root {
+  --motion-fast: 120ms;
+  --motion-base: 200ms;
+  --motion-slow: 400ms;
+  --motion-stagger: 40ms;
+  /* The fixed disclaimer strip at the bottom of every page. */
+  --disclaimer-h: 2.25rem;
+  /* The fixed phone bottom nav (src/components/shell/bottom-nav.tsx). */
+  --bottom-nav-h: 3.75rem;
+}
+
 /* Semantic colors (shadcn/ui names + TaxBack extras). Light is the default. */
 :root {
   /*
@@ -114,6 +208,14 @@
   --chart-3: #7c7a85;
   --chart-4: #b5b2bc;
   --chart-hatch: #7c7a85;
+  /* Hover states, derived from the ladder rather than new colors. */
+  --border-strong: color-mix(in srgb, #0f172a 18%, #e3e7eb);
+  --primary-hover: color-mix(in srgb, #2563eb 88%, #0f172a);
+  --surface-hover: #eef1f4;
+  /* Landing candle field (canvas): neutral candles, dotted guides, and the spotlight green. */
+  --candle: #49474e;
+  --candle-guide: #e3e7eb;
+  --candle-glow: #15803d;
 }
 
 .dark {
@@ -148,6 +250,14 @@
   --chart-3: #7c7a85;
   --chart-4: #49474e;
   --chart-hatch: #7c7a85;
+  /* Basalt to Pewter on hover; Signal Green brightened toward Ash; Graphite to Obsidian. */
+  --border-strong: #3c393f;
+  --primary-hover: color-mix(in srgb, #71d083 88%, #eeeef0);
+  --surface-hover: #1a191b;
+  /* Chalk candles, Basalt guides, Signal Green spotlight. */
+  --candle: #e5e5e5;
+  --candle-guide: #2b292d;
+  --candle-glow: #71d083;
 }
 
 @theme inline {
@@ -180,4 +290,7 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-hatch: var(--chart-hatch);
+  --color-border-strong: var(--border-strong);
+  --color-primary-hover: var(--primary-hover);
+  --color-surface-hover: var(--surface-hover);
 }

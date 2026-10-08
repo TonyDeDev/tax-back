@@ -403,7 +403,7 @@ export default async function Hub(props: PageProps<"/hub">) {
         <KpiCard
           featured
           label="Total value"
-          value={<Money value={totalCad} />}
+          value={<Money value={totalCad} countUp />}
           href="#accounts"
           hrefLabel="Jump to accounts"
           caption={
@@ -420,14 +420,14 @@ export default async function Hub(props: PageProps<"/hub">) {
         />
         <KpiCard
           label="YTD realized gains"
-          value={<Money value={summary.ytdGainCad} signed />}
+          value={<Money value={summary.ytdGainCad} signed countUp />}
           caption={`Non-registered accounts, ${year}${selected ? ", all brokerages" : ""}`}
           href={`/tax/${year}`}
           hrefLabel={`Open the ${year} Tax Center`}
         />
         <KpiCard
           label="Estimated tax"
-          value={summary.estimatedTaxCad === null ? "Not set" : <Money value={summary.estimatedTaxCad} />}
+          value={summary.estimatedTaxCad === null ? "Not set" : <Money value={summary.estimatedTaxCad} countUp />}
           caption={
             summary.estimatedTaxCad === null ? (
               user.isDemo ? (

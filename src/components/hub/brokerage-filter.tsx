@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { ActiveIndicator } from "@/components/motion/active-indicator";
 import { cn } from "@/lib/utils";
 
 interface BrokerageFilterProps {
@@ -12,7 +13,7 @@ export function BrokerageFilter({ brokerages, selected }: BrokerageFilterProps) 
   if (brokerages.length < 2) return null;
   const options = [{ id: null, name: "All" }, ...brokerages];
   return (
-    <nav aria-label="Brokerage filter" className="flex flex-wrap gap-1">
+    <nav aria-label="Brokerage filter" data-indicator-group className="isolate flex flex-wrap gap-1">
       {options.map((b) => {
         const active = b.id === selected;
         return (
@@ -22,12 +23,15 @@ export function BrokerageFilter({ brokerages, selected }: BrokerageFilterProps) 
             aria-current={active ? "page" : undefined}
             scroll={false}
             className={cn(
-              "flex h-8 items-center rounded-sm border px-3 text-caption font-medium transition-colors",
+              "relative flex h-8 items-center rounded-sm border px-3 text-caption font-medium transition-motion",
               active
-                ? "border-highlight-border bg-highlight text-highlight-foreground"
-                : "border-border text-muted-foreground hover:bg-accent hover:text-foreground",
+                ? "border-transparent text-highlight-foreground"
+                : "border-border text-muted-foreground hover:border-border-strong hover:bg-accent hover:text-foreground",
             )}
           >
+            {active && (
+              <ActiveIndicator group="brokerage-filter" className="-inset-px rounded-sm border border-highlight-border bg-highlight" />
+            )}
             {b.name}
           </Link>
         );

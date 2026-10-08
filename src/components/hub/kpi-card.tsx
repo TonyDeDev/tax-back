@@ -40,7 +40,7 @@ export function KpiCard({ label, value, caption, featured = false, href, hrefLab
           aria-label={hrefLabel}
           title={hrefLabel}
           className={cn(
-            "-mt-1 -mr-1 flex size-7 shrink-0 items-center justify-center rounded-sm border text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+            "-mt-1 -mr-1 flex size-7 shrink-0 items-center justify-center rounded-sm border text-muted-foreground transition-motion hover:border-border-strong hover:bg-accent hover:text-foreground",
             featured ? "border-highlight-border" : "border-border",
           )}
         >

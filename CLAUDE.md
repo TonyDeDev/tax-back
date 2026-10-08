@@ -123,7 +123,7 @@ The daily cron resets it, and the Hub seeds it on the first demo visit if it is 
 - **Contributions** (`/contributions/[year]`): room and contributions per registered plan, CRA figures to enter, deposits and withdrawals to reclassify, and contributions TaxBack cannot see.
 - **Settings:** theme, connected brokerages (link to the SnapTrade Dashboard), delete my data (revokes the SnapTrade refresh token first).
 
-Every page shows a "Concept demo - not tax advice" badge.
+Every page shows one disclaimer: a slim "Concept demo - not tax advice" strip fixed to the bottom of the viewport, dismissible (remembered in localStorage). No other per-page or per-card disclaimers.
 
 ## Design
 
@@ -149,6 +149,9 @@ Every page shows a "Concept demo - not tax advice" badge.
 - **Shape:** radius 2px (`rounded-sm`: tags, nav, icons) or 6px (`rounded-md`: buttons, cards, inputs), never larger.
   No drop shadows; elevation comes from surface steps, hairline borders, and `shadow-subtle`.
 - **Spacing:** Tailwind's default 4px grid.
+- **Motion:** tokens in `theme.css` (`--motion-fast` 120ms, `--motion-base` 200ms, `--motion-slow` 400ms, `--ease-out`, `--ease-in-out`, `--animate-*`); helpers in `src/components/motion/`.
+  Animate only transform, opacity, color, and border-color; never width, height, or layout.
+  CSS first, no animation library. `prefers-reduced-motion` keeps short opacity fades only.
 - **Layout (provisional, still being designed):** current direction is a desktop sidebar with bottom nav and stacked cards on phones.
   Whatever the layout, it works on phone and desktop with no horizontal page scroll.
 

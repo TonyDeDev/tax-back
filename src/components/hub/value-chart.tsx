@@ -4,6 +4,8 @@ import { LineChart as LineChartIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { useAmountsHidden } from "@/components/amounts";
+import { ActiveIndicator } from "@/components/motion/active-indicator";
+import { useReducedMotion } from "@/components/motion/use-reduced-motion";
 import { formatCompactMoney, formatMoney, formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -62,7 +64,7 @@ function ChartTooltip({ active, payload, hidden }: { active?: boolean; payload?:
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
-    <div className="rounded-md border bg-popover px-3 py-2 shadow-subtle">
+    <div className="animate-fade-in rounded-md border bg-popover px-3 py-2 shadow-subtle">
       <p className="text-caption text-muted-foreground">{formatShortDate(point.day, true)}</p>
       <p className="font-mono text-body-sm tabular-nums text-popover-foreground">{formatMoney(point.value, "CAD", { hidden })}</p>
     </div>
@@ -72,6 +74,7 @@ function ChartTooltip({ active, payload, hidden }: { active?: boolean; payload?:
 /** Portfolio value over time, from the daily snapshots each sync writes. */
 export function ValueChart({ points, today }: ValueChartProps) {
   const hidden = useAmountsHidden();
+  const reduced = useReducedMotion();
   const [range, setRange] = useState<Range>("3M");
   const gradientId = useId().replace(/:/g, "");
   const start = rangeStart(range, today);
@@ -80,7 +83,7 @@ export function ValueChart({ points, today }: ValueChartProps) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="group" aria-label="Time range" className="flex flex-wrap gap-1">
+      <div role="group" aria-label="Time range" data-indicator-group className="isolate flex flex-wrap gap-1">
         {RANGES.map((r) => (
           <button
             key={r}
@@ -89,12 +92,13 @@ export function ValueChart({ points, today }: ValueChartProps) {
             aria-label={RANGE_LABELS[r]}
             onClick={() => setRange(r)}
             className={cn(
-              "h-7 min-w-9 rounded-sm border px-2 font-mono text-caption tabular-nums transition-colors",
-              range === r
-                ? "border-highlight-border bg-highlight text-highlight-foreground"
-                : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground",
+              "relative h-7 min-w-9 rounded-sm border border-transparent px-2 font-mono text-caption tabular-nums transition-motion",
+              range === r ? "text-highlight-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground",
             )}
           >
+            {range === r && (
+              <ActiveIndicator group="value-range" className="-inset-px rounded-sm border border-highlight-border bg-highlight" />
+            )}
             {r}
           </button>
         ))}
@@ -116,7 +120,8 @@ export function ValueChart({ points, today }: ValueChartProps) {
           className="h-56 min-w-0"
         >
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={data} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
+            {/* Keyed by range, so each range draws in from the left (800ms) rather than morphing. */}
+            <AreaChart key={range} data={data} margin={{ top: 4, right: 16, bottom: 0, left: 0 }}>
               <defs>
                 <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.22} />
@@ -154,7 +159,9 @@ export function ValueChart({ points, today }: ValueChartProps) {
                 strokeWidth={2}
                 fill={`url(#${gradientId})`}
                 activeDot={{ r: 4, fill: "var(--chart-1)", stroke: "var(--card)", strokeWidth: 2 }}
-                isAnimationActive={false}
+                isAnimationActive={!reduced}
+                animationDuration={800}
+                animationEasing="ease-out"
               />
             </AreaChart>
           </ResponsiveContainer>

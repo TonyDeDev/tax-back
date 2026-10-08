@@ -27,3 +27,106 @@
     outline-offset: 2px;
   }
 }
+
+/* State changes on interactive surfaces: hover colors, borders, and small transform nudges. */
+@utility transition-motion {
+  transition-property: color, background-color, border-color, fill, stroke, opacity, transform;
+  transition-duration: var(--motion-fast);
+  transition-timing-function: var(--ease-out);
+}
+
+/* A page's top-level blocks fade up one after another: 40ms apart, capped at the sixth. */
+@utility motion-stagger {
+  & > * {
+    animation: var(--animate-fade-up);
+  }
+  & > :nth-child(2) {
+    animation-delay: calc(var(--motion-stagger) * 1);
+  }
+  & > :nth-child(3) {
+    animation-delay: calc(var(--motion-stagger) * 2);
+  }
+  & > :nth-child(4) {
+    animation-delay: calc(var(--motion-stagger) * 3);
+  }
+  & > :nth-child(5) {
+    animation-delay: calc(var(--motion-stagger) * 4);
+  }
+  & > :nth-child(n + 6) {
+    animation-delay: calc(var(--motion-stagger) * 5);
+  }
+}
+
+/*
+ * Scroll reveals (src/components/motion/reveal.tsx). Content is only hidden when scripts run, so a page
+ * without JavaScript still shows everything. Hairlines inside a revealed block draw in from the left.
+ */
+@media (scripting: enabled) {
+  [data-reveal]:not([data-revealed]) {
+    opacity: 0;
+  }
+}
+[data-reveal][data-revealed] {
+  animation: var(--animate-fade-up);
+}
+/* A list that staggers in only once its section is revealed (the Contact cards, 60ms apart). */
+[data-revealed] .reveal-stagger > * {
+  animation: var(--animate-fade-up);
+}
+[data-revealed] .reveal-stagger > :nth-child(2) {
+  animation-delay: calc(var(--motion-stagger) * 1);
+}
+[data-revealed] .reveal-stagger > :nth-child(3) {
+  animation-delay: calc(var(--motion-stagger) * 2);
+}
+[data-revealed] .reveal-stagger > :nth-child(4) {
+  animation-delay: calc(var(--motion-stagger) * 3);
+}
+[data-revealed] .reveal-stagger > :nth-child(5) {
+  animation-delay: calc(var(--motion-stagger) * 4);
+}
+[data-revealed] .reveal-stagger > :nth-child(n + 6) {
+  animation-delay: calc(var(--motion-stagger) * 5);
+}
+[data-reveal][data-revealed] [data-hairline] {
+  transform-origin: left;
+  animation: var(--animate-draw-x);
+}
+
+/* Disclosure bodies (native <details>) fade and scale in from 0.98 when opened. */
+details[open] > :not(summary) {
+  animation: var(--animate-pop-in);
+}
+
+/*
+ * The bottom disclaimer strip (src/components/disclaimer-strip.tsx) reserves its own height, and sits
+ * above the phone bottom nav wherever that nav is on the page.
+ */
+:root {
+  --strip-bottom: 0px;
+  --strip-space: 0px;
+}
+body[data-disclaimer] {
+  --strip-space: var(--disclaimer-h);
+  padding-bottom: var(--strip-space);
+}
+@media (width < 64rem) {
+  body:has([data-bottom-nav]) {
+    --strip-bottom: var(--bottom-nav-h);
+  }
+}
+
+/* Reduced motion: no movement, scaling or counting; only short opacity fades remain. */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --animate-fade-up: fade-in var(--motion-fast) var(--ease-out) backwards;
+    --animate-pop-in: fade-in var(--motion-fast) var(--ease-out) backwards;
+    --animate-strip-in: fade-in var(--motion-fast) var(--ease-out) backwards;
+    --animate-draw-x: fade-in var(--motion-fast) var(--ease-out) backwards;
+    --animate-draw-stroke: fade-in var(--motion-fast) var(--ease-out) backwards;
+    --animate-sweep: fade-in var(--motion-fast) var(--ease-out) backwards;
+    --animate-shimmer: none;
+    --animate-status-pulse: none;
+    --motion-stagger: 0ms;
+  }
+}
