@@ -4,8 +4,19 @@ function toNumber(value: NumericInput): number {
   return typeof value === "number" ? value : Number(value);
 }
 
+/**
+ * What stands in for an amount while amounts are hidden. The sign goes too: a bare "+" would still
+ * say whether a position is up, which is most of what someone reading over your shoulder wants.
+ */
+export const MASKED_MONEY = "••••";
+
 /** Display only. Tax math is never done in the browser, so converting a saved decimal string to a number here is safe. */
-export function formatMoney(value: NumericInput, currency = "CAD", opts: { signed?: boolean } = {}): string {
+export function formatMoney(
+  value: NumericInput,
+  currency = "CAD",
+  opts: { signed?: boolean; hidden?: boolean } = {},
+): string {
+  if (opts.hidden) return MASKED_MONEY;
   const n = toNumber(value);
   const text = new Intl.NumberFormat("en-CA", {
     style: "currency",
@@ -55,7 +66,8 @@ export function formatAgo(when: Date, now: Date): string {
 }
 
 /** Axis labels: "$43K", "$1.2M". Display only. */
-export function formatCompactMoney(value: NumericInput, currency = "CAD"): string {
+export function formatCompactMoney(value: NumericInput, currency = "CAD", opts: { hidden?: boolean } = {}): string {
+  if (opts.hidden) return MASKED_MONEY;
   return new Intl.NumberFormat("en-CA", {
     style: "currency",
     currency,

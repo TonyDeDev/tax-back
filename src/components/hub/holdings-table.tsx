@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { EmptyState } from "@/components/empty-state";
 import { Money } from "@/components/money";
+import { useAmountsHidden } from "@/components/amounts";
 import { formatMoney, formatPercent, formatQuantity } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { Sparkline } from "./sparkline";
@@ -138,6 +139,7 @@ const rowClass = "cursor-pointer border-b transition-colors last:border-0 hover:
 const cell = "px-2 py-2.5 xl:px-3 text-right font-mono";
 
 function PooledTable({ rows }: { rows: PooledHolding[] }) {
+  const hidden = useAmountsHidden();
   const router = useRouter();
   const [sort, setSort] = useState<Sort<PooledKey>>({ key: "marketValueCad", desc: true });
   const onSort = (key: PooledKey) => setSort((s) => (s.key === key ? { key, desc: !s.desc } : { key, desc: key !== "symbol" }));
@@ -168,19 +170,19 @@ function PooledTable({ rows }: { rows: PooledHolding[] }) {
                   values={r.trend}
                   label={
                     r.trend.length > 1
-                      ? `${r.symbol} price over 90 days: ${formatMoney(r.trend[0]!)} to ${formatMoney(r.trend.at(-1)!)}`
+                      ? `${r.symbol} price over 90 days: ${formatMoney(r.trend[0]!, "CAD", { hidden })} to ${formatMoney(r.trend.at(-1)!, "CAD", { hidden })}`
                       : `${r.symbol}: no price history yet`
                   }
                 />
               </span>
             </td>
             <td className={cell}>{formatQuantity(r.brokerQuantity)}</td>
-            <td className={cell}>{r.marketValueCad ? formatMoney(r.marketValueCad) : "-"}</td>
+            <td className={cell}>{r.marketValueCad ? formatMoney(r.marketValueCad, "CAD", { hidden }) : "-"}</td>
             <td className={cn(cell, "hidden text-muted-foreground min-[1400px]:table-cell")}>
               <WeightBar weight={r.weight} />
             </td>
             <td className={cell}>{formatQuantity(r.pooledQuantity)}</td>
-            <td className={cell}>{r.totalAcbCad ? formatMoney(r.totalAcbCad) : "-"}</td>
+            <td className={cell}>{r.totalAcbCad ? formatMoney(r.totalAcbCad, "CAD", { hidden }) : "-"}</td>
             <td className={cell}>{r.unrealizedCad ? <Money value={r.unrealizedCad} signed className="justify-end" /> : "-"}</td>
           </tr>
         ))}
@@ -190,6 +192,7 @@ function PooledTable({ rows }: { rows: PooledHolding[] }) {
 }
 
 function AccountTable({ rows }: { rows: AccountHolding[] }) {
+  const hidden = useAmountsHidden();
   const router = useRouter();
   const [sort, setSort] = useState<Sort<AccountKey>>({ key: "marketValueCad", desc: true });
   const onSort = (key: AccountKey) =>
@@ -219,7 +222,7 @@ function AccountTable({ rows }: { rows: AccountHolding[] }) {
             </td>
             <td className="hidden px-2 py-2.5 xl:px-3 text-muted-foreground lg:table-cell">{r.accountTypeLabel}</td>
             <td className={cell}>{formatQuantity(r.quantity)}</td>
-            <td className={cell}>{r.marketValueCad ? formatMoney(r.marketValueCad) : "-"}</td>
+            <td className={cell}>{r.marketValueCad ? formatMoney(r.marketValueCad, "CAD", { hidden }) : "-"}</td>
             <td className={cn(cell, "hidden text-muted-foreground xl:table-cell")}>
               <WeightBar weight={r.weight} />
             </td>
@@ -232,6 +235,7 @@ function AccountTable({ rows }: { rows: AccountHolding[] }) {
 
 /** Narrow screens: one stacked row per holding, market value on the right. */
 function StackedList({ rows }: { rows: (PooledHolding | AccountHolding)[] }) {
+  const hidden = useAmountsHidden();
   return (
     <ul className="flex flex-col divide-y divide-border md:hidden">
       {rows.map((r) => {
@@ -246,7 +250,7 @@ function StackedList({ rows }: { rows: (PooledHolding | AccountHolding)[] }) {
                 </span>
               </span>
               <span className="flex shrink-0 flex-col items-end font-mono tabular-nums">
-                <span className="text-body-sm">{r.marketValueCad ? formatMoney(r.marketValueCad) : "-"}</span>
+                <span className="text-body-sm">{r.marketValueCad ? formatMoney(r.marketValueCad, "CAD", { hidden }) : "-"}</span>
                 <span className="text-caption text-muted-foreground">{formatQuantity(units)} units</span>
               </span>
             </Link>

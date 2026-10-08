@@ -3,6 +3,7 @@
 import { LineChart as LineChartIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { useAmountsHidden } from "@/components/amounts";
 import { formatCompactMoney, formatMoney, formatShortDate } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -57,19 +58,20 @@ interface TooltipPayload {
   payload?: { day: string; value: number };
 }
 
-function ChartTooltip({ active, payload }: { active?: boolean; payload?: TooltipPayload[] }) {
+function ChartTooltip({ active, payload, hidden }: { active?: boolean; payload?: TooltipPayload[]; hidden?: boolean }) {
   const point = payload?.[0]?.payload;
   if (!active || !point) return null;
   return (
     <div className="rounded-md border bg-popover px-3 py-2 shadow-subtle">
       <p className="text-caption text-muted-foreground">{formatShortDate(point.day, true)}</p>
-      <p className="font-mono text-body-sm tabular-nums text-popover-foreground">{formatMoney(point.value)}</p>
+      <p className="font-mono text-body-sm tabular-nums text-popover-foreground">{formatMoney(point.value, "CAD", { hidden })}</p>
     </div>
   );
 }
 
 /** Portfolio value over time, from the daily snapshots each sync writes. */
 export function ValueChart({ points, today }: ValueChartProps) {
+  const hidden = useAmountsHidden();
   const [range, setRange] = useState<Range>("3M");
   const gradientId = useId().replace(/:/g, "");
   const start = rangeStart(range, today);
@@ -110,7 +112,7 @@ export function ValueChart({ points, today }: ValueChartProps) {
       ) : (
         <div
           role="img"
-          aria-label={`Portfolio value, ${RANGE_LABELS[range].toLowerCase()}: ${formatMoney(data[0]!.value)} on ${formatShortDate(data[0]!.day, true)}, ${formatMoney(data.at(-1)!.value)} on ${formatShortDate(data.at(-1)!.day, true)}.`}
+          aria-label={`Portfolio value, ${RANGE_LABELS[range].toLowerCase()}: ${formatMoney(data[0]!.value, "CAD", { hidden })} on ${formatShortDate(data[0]!.day, true)}, ${formatMoney(data.at(-1)!.value, "CAD", { hidden })} on ${formatShortDate(data.at(-1)!.day, true)}.`}
           className="h-56 min-w-0"
         >
           <ResponsiveContainer width="100%" height="100%">
@@ -134,14 +136,14 @@ export function ValueChart({ points, today }: ValueChartProps) {
               <YAxis
                 width={56}
                 domain={["auto", "auto"]}
-                tickFormatter={(v: number) => formatCompactMoney(v)}
+                tickFormatter={(v: number) => formatCompactMoney(v, "CAD", { hidden })}
                 tick={{ fill: "var(--muted-foreground)", fontSize: 12, fontFamily: "var(--font-mono)" }}
                 tickLine={false}
                 axisLine={false}
                 tickCount={4}
               />
               <Tooltip
-                content={<ChartTooltip />}
+                content={<ChartTooltip hidden={hidden} />}
                 cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1, strokeDasharray: "3 3" }}
                 isAnimationActive={false}
               />

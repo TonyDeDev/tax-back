@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { ACB_RULE_TEXT } from "@/lib/acb-rules";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
 import { formatDate, formatMoney, formatQuantity } from "@/lib/format";
+import { amountsHidden } from "@/server/amounts";
 import { requireUser } from "@/server/auth/session";
 import { getDb } from "@/server/db";
 import { type AuditStep, type SecurityDetail, canonicalSecurityId, getSecurityDetail } from "@/server/queries/security";
@@ -61,9 +62,9 @@ function SourceDetail({ step }: { step: AuditStep }) {
       <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <Figure label="Corporate action">{verb}</Figure>
         <Figure label="New shares per old">{formatQuantity(src.ratio, 6)}</Figure>
-        {src.oldFmv && <Figure label="Old share value">{formatMoney(src.oldFmv, src.currency)}</Figure>}
-        {src.newFmv && <Figure label="New share value">{formatMoney(src.newFmv, src.currency)}</Figure>}
-        {Number(src.cashPerShare) > 0 && <Figure label="Cash per old share">{formatMoney(src.cashPerShare, src.currency)}</Figure>}
+        {src.oldFmv && <Figure label="Old share value"><Money value={src.oldFmv} currency={src.currency} /></Figure>}
+        {src.newFmv && <Figure label="New share value"><Money value={src.newFmv} currency={src.currency} /></Figure>}
+        {Number(src.cashPerShare) > 0 && <Figure label="Cash per old share"><Money value={src.cashPerShare} currency={src.currency} /></Figure>}
       </dl>
     );
   }
@@ -77,11 +78,11 @@ function SourceDetail({ step }: { step: AuditStep }) {
       <Figure label="Trade date">{formatDate(src.tradeDate)}</Figure>
       {Number(src.quantity) > 0 && (
         <Figure label="Units x price">
-          {formatQuantity(src.quantity)} x {formatMoney(src.price, src.currency)}
+          {formatQuantity(src.quantity)} x <Money value={src.price} currency={src.currency} />
         </Figure>
       )}
-      {cash && Number(src.amount) > 0 && <Figure label="Amount">{formatMoney(src.amount, src.currency)}</Figure>}
-      {Number(src.fees) > 0 && <Figure label="Commission">{formatMoney(src.fees, src.currency)}</Figure>}
+      {cash && Number(src.amount) > 0 && <Figure label="Amount"><Money value={src.amount} currency={src.currency} /></Figure>}
+      {Number(src.fees) > 0 && <Figure label="Commission"><Money value={src.fees} currency={src.currency} /></Figure>}
       {step.fxRate && (
         <Figure label="Exchange rate">
           {src.currency === "CAD" ? "CAD, no conversion" : `1 ${src.currency} = ${Number(step.fxRate).toFixed(4)} CAD`}
@@ -116,7 +117,7 @@ function AuditTrail({ steps }: { steps: AuditStep[] }) {
                   <Money value={step.acbDeltaCad} signed className="justify-end" />
                 </span>
                 <span className="row-span-2 flex flex-col items-end sm:row-span-1">
-                  <span className="text-body-sm font-medium tabular-nums">{formatMoney(step.poolAcbAfterCad)}</span>
+                  <span className="text-body-sm font-medium tabular-nums"><Money value={step.poolAcbAfterCad} /></span>
                   <span className="text-caption text-muted-foreground tabular-nums">{formatQuantity(step.poolQuantityAfter)} units</span>
                 </span>
                 <ChevronDown aria-hidden className="hidden size-4 text-muted-foreground transition-transform group-open:rotate-180 sm:block" />
@@ -129,8 +130,8 @@ function AuditTrail({ steps }: { steps: AuditStep[] }) {
                   <Figure label="ACB change">
                     <Money value={step.acbDeltaCad} signed />
                   </Figure>
-                  <Figure label="Total ACB after">{formatMoney(step.poolAcbAfterCad)}</Figure>
-                  <Figure label="ACB per unit after">{step.acbPerShareAfterCad ? formatMoney(step.acbPerShareAfterCad) : "-"}</Figure>
+                  <Figure label="Total ACB after"><Money value={step.poolAcbAfterCad} /></Figure>
+                  <Figure label="ACB per unit after">{step.acbPerShareAfterCad ? <Money value={step.acbPerShareAfterCad} /> : "-"}</Figure>
                 </dl>
               </div>
             </details>
@@ -183,7 +184,7 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
   // Listings of the same shares share one page: the canonical one, where their ACB is pooled.
   const canonical = await canonicalSecurityId(db, user.id, id);
   if (canonical !== id) redirect(`/hub/securities/${canonical}`);
-  const detail = await getSecurityDetail(db, user.id, id, torontoToday());
+  const [detail, hidden] = await Promise.all([getSecurityDetail(db, user.id, id, torontoToday()), amountsHidden()]);
   if (!detail) notFound();
   const { security, position } = detail;
 
@@ -218,7 +219,7 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
         <StatCard
           label="Unrealized"
           value={detail.unrealizedCad ? <Money value={detail.unrealizedCad} signed /> : "-"}
-          hint={detail.marketValueCad ? `Market value ${formatMoney(detail.marketValueCad)}` : "No price yet"}
+          hint={detail.marketValueCad ? `Market value ${formatMoney(detail.marketValueCad, "CAD", { hidden })}` : "No price yet"}
         />
       </section>
 
@@ -318,12 +319,12 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
                       <td className="px-3 py-2">{formatDate(g.date)}</td>
                       <td className="px-3 py-2">
                         {GAIN_LABELS[g.kind]}
-                        {Number(g.deniedLossCad) > 0 && <span className="block text-caption text-muted-foreground">{formatMoney(g.deniedLossCad)} loss denied</span>}
+                        {Number(g.deniedLossCad) > 0 && <span className="block text-caption text-muted-foreground"><Money value={g.deniedLossCad} /> loss denied</span>}
                       </td>
                       <td className="px-3 py-2 text-right">{formatQuantity(g.quantity)}</td>
-                      <td className="px-3 py-2 text-right">{formatMoney(g.proceedsCad)}</td>
-                      <td className="px-3 py-2 text-right">{formatMoney(g.acbCad)}</td>
-                      <td className="px-3 py-2 text-right">{formatMoney(g.feesCad)}</td>
+                      <td className="px-3 py-2 text-right"><Money value={g.proceedsCad} /></td>
+                      <td className="px-3 py-2 text-right"><Money value={g.acbCad} /></td>
+                      <td className="px-3 py-2 text-right"><Money value={g.feesCad} /></td>
                       <td className="px-3 py-2 text-right">
                         <Money value={g.allowedGainCad} signed className="justify-end" />
                       </td>
@@ -380,7 +381,7 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
                   <li key={a.id} className="flex items-center justify-between gap-3 px-4 py-2">
                     <span className="text-body-sm">
                       {formatDate(a.effectiveDate)} · {label} · {formatQuantity(a.ratio, 6)} new per old
-                      {Number(a.cashPerShare) > 0 ? ` plus ${formatMoney(a.cashPerShare, a.currency)} cash` : ""}
+                      {Number(a.cashPerShare) > 0 ? ` plus ${formatMoney(a.cashPerShare, a.currency, { hidden })} cash` : ""}
                     </span>
                     {!user.isDemo && a.role === "source" && <DeleteCorporateActionButton securityId={security.id} id={a.id} label={label} />}
                   </li>

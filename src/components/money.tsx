@@ -1,4 +1,7 @@
+"use client";
+
 import { ArrowDownRight, ArrowUpRight } from "lucide-react";
+import { useAmountsHidden } from "@/components/amounts";
 import { directionOf, formatMoney, type NumericInput } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -11,8 +14,11 @@ interface MoneyProps {
 }
 
 export function Money({ value, currency = "CAD", signed = false, className }: MoneyProps) {
-  const text = formatMoney(value, currency, { signed });
-  if (!signed) return <span className={cn("tabular-nums", className)}>{text}</span>;
+  const hidden = useAmountsHidden();
+  const text = formatMoney(value, currency, { signed, hidden });
+
+  // While hidden, drop the arrow and the gain/loss color too: either would still say which way it went.
+  if (!signed || hidden) return <span className={cn("tabular-nums", className)}>{text}</span>;
 
   const direction = directionOf(value);
   // Zero has no sign, so it gets no arrow either: a dash-like icon would read as a negative amount.

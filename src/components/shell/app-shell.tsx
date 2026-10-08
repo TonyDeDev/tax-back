@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { HideAmountsToggle } from "@/components/amounts";
 import { SignOutButton, type ShellUser } from "@/components/auth/user-menu";
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -13,6 +14,7 @@ export function AppShell({ user, children }: { user: ShellUser; children: ReactN
         <header className="flex items-center justify-between border-b bg-card px-4 py-2 lg:hidden">
           <Brand />
           <div className="flex items-center gap-1">
+            <HideAmountsToggle />
             <ThemeToggle />
             <SignOutButton />
           </div>

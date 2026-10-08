@@ -18,10 +18,11 @@ import { SyncControls } from "@/components/sync/sync-controls";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
-import { formatAgo, formatMoney, formatPercent, formatQuantity, formatShortDate } from "@/lib/format";
+import { formatAgo, formatPercent, formatQuantity, formatShortDate } from "@/lib/format";
 import { type AttentionItem, warningAttention } from "@/lib/warnings";
 import { hasSnapTradeGrant } from "@/server/auth/accounts";
 import { configuredProviders } from "@/server/auth/config";
+import { amountsHidden } from "@/server/amounts";
 import { requireUser } from "@/server/auth/session";
 import { SNAPTRADE_DASHBOARD_URL } from "@/server/auth/snaptrade-provider";
 import { getDb } from "@/server/db";
@@ -96,7 +97,7 @@ function SyncProblem({ sync }: { sync: HubSync }) {
 }
 
 /** Every item the "Needs attention" card lists; the Alerts count is its length. */
-function attentionItems(summary: HubSummary, reconciliation: ReconciliationSummary): AttentionItem[] {
+function attentionItems(summary: HubSummary, reconciliation: ReconciliationSummary, hidden: boolean): AttentionItem[] {
   const broken = summary.brokerages.filter((b) => b.status === "broken");
   return [
     ...broken.map((b) => ({
@@ -123,7 +124,7 @@ function attentionItems(summary: HubSummary, reconciliation: ReconciliationSumma
       href: `/hub/securities/${g.securityId}#opening`,
       linkLabel: g.status === "broker_has_more" ? "Add opening balance" : "Review",
     })),
-    ...summary.warnings.map(warningAttention),
+    ...summary.warnings.map((w) => warningAttention(w, hidden)),
   ];
 }
 
@@ -173,7 +174,7 @@ function BrokerageSection({ brokerage: b, totalCad, readOnly }: { brokerage: Hub
           )}
           <span className="font-mono text-body-sm font-medium tabular-nums">
             <span className="sr-only">Subtotal </span>
-            {formatMoney(b.totalCad)}
+            <Money value={b.totalCad} />
             {b.totalIncomplete && <span className="text-muted-foreground"> + unconverted</span>}
           </span>
         </div>
@@ -211,6 +212,7 @@ function NotConnected() {
 
 export default async function Hub(props: PageProps<"/hub">) {
   const user = await requireUser("/hub");
+  const hidden = await amountsHidden();
   const params = await props.searchParams;
   const db = getDb();
   const connected = !user.isDemo && (await hasSnapTradeGrant(db, user.id));
@@ -284,7 +286,7 @@ export default async function Hub(props: PageProps<"/hub">) {
   const totalCad = selected ? selected.totalCad : summary.totalValueCad;
   const totalIncomplete = selected ? selected.totalIncomplete : summary.totalIncomplete;
   const change = latestChange(history);
-  const attention = attentionItems(summary, reconciliation);
+  const attention = attentionItems(summary, reconciliation, hidden);
   const needAction = attention.filter((a) => a.tone === "negative").length;
   const weightOf = (value: string | null) =>
     value === null || new D(totalCad).isZero() ? null : new D(value).div(totalCad).toFixed(6);

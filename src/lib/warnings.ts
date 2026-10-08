@@ -21,8 +21,8 @@ export interface WarningView {
   dueDate: string | null;
 }
 
-/** One plain sentence per warning. */
-export function warningMessage(w: WarningView): string {
+/** One plain sentence per warning. `hidden` masks the amounts, for the "hide amounts" toggle. */
+export function warningMessage(w: WarningView, hidden = false): string {
   const symbol = w.symbol ?? "A security";
   switch (w.type) {
     case "opening_balance_needed":
@@ -31,7 +31,7 @@ export function warningMessage(w: WarningView): string {
       }, so its ACB is understated. Older history is missing.`;
     case "superficial_loss_lost_forever":
       return `${symbol}: a superficial loss${
-        w.amountCad ? ` of ${formatMoney(w.amountCad)}` : ""
+        w.amountCad ? ` of ${formatMoney(w.amountCad, "CAD", { hidden })}` : ""
       } was denied for good because the replacement shares are in a registered account.`;
     case "superficial_loss_pending":
       return `${symbol}: a capital loss is denied as superficial for now. It is final once the 30-day window ends${
@@ -45,7 +45,7 @@ export function warningMessage(w: WarningView): string {
       return `${symbol}: shares crossed between a registered and a non-registered account, but the broker sent no market value, so the transfer was not applied.`;
     case "registered_transfer_loss_denied":
       return `${symbol}: shares moved into a registered account at a loss${
-        w.amountCad ? ` of ${formatMoney(w.amountCad)}` : ""
+        w.amountCad ? ` of ${formatMoney(w.amountCad, "CAD", { hidden })}` : ""
       }. That loss is denied for good, unlike a superficial loss.`;
     case "roc_without_position":
       return `${symbol}: a return of capital arrived while no shares were held.`;
@@ -66,10 +66,10 @@ export interface AttentionItem {
 }
 
 /** A warning as one short line with a link to where it is resolved. The full sentence is `warningMessage`. */
-export function warningAttention(w: WarningView): AttentionItem {
+export function warningAttention(w: WarningView, hidden = false): AttentionItem {
   const symbol = w.symbol ?? "A security";
   const security = w.securityId ? `/hub/securities/${w.securityId}` : "/hub";
-  const amount = w.amountCad ? ` (${formatMoney(w.amountCad)})` : "";
+  const amount = w.amountCad ? ` (${formatMoney(w.amountCad, "CAD", { hidden })})` : "";
   switch (w.type) {
     case "opening_balance_needed":
       return { tone: "negative", text: `${symbol}: older history is missing`, href: `${security}#opening`, linkLabel: "Add opening balance" };

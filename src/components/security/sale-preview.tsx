@@ -6,6 +6,7 @@ import { type SalePreviewView, previewSaleAction } from "@/app/(app)/hub/securit
 import { Money } from "@/components/money";
 import { Button } from "@/components/ui/button";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
+import { useAmountsHidden } from "@/components/amounts";
 import { formatDate, formatMoney, formatPercent, formatQuantity } from "@/lib/format";
 import type { AccountType } from "@/tax-engine/types";
 import { Field, FormError, SelectInput, TextInput } from "./fields";
@@ -31,6 +32,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 }
 
 function Result({ p }: { p: SalePreviewView }) {
+  const hidden = useAmountsHidden();
   const loss = Number(p.gainCad) < 0;
   const superficial = p.superficialStatus !== null;
   return (
@@ -66,7 +68,7 @@ function Result({ p }: { p: SalePreviewView }) {
           <ShieldAlert aria-hidden className="mt-0.5 size-4 shrink-0 text-negative" />
           <div className="flex flex-col gap-1 text-body-sm">
             <p>
-              <strong>Superficial loss window is open.</strong> {formatMoney(p.deniedLossCad)} of this loss would be denied because of
+              <strong>Superficial loss window is open.</strong> {formatMoney(p.deniedLossCad, "CAD", { hidden })} of this loss would be denied because of
               purchases between {formatDate(p.windowStart)} and today:
             </p>
             <ul className="list-disc pl-5">
@@ -79,7 +81,7 @@ function Result({ p }: { p: SalePreviewView }) {
             </ul>
             {Number(p.lostForeverCad) > 0 && (
               <p>
-                {formatMoney(p.lostForeverCad)} of it is lost for good, because the replacement units are in a registered account.
+                {formatMoney(p.lostForeverCad, "CAD", { hidden })} of it is lost for good, because the replacement units are in a registered account.
               </p>
             )}
             <p className="text-muted-foreground">Selling the replacement units before {formatDate(p.windowEnd)} could change this.</p>

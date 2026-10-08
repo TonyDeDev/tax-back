@@ -1,4 +1,5 @@
-import { formatMoney, formatPercent } from "@/lib/format";
+import { Money } from "@/components/money";
+import { formatPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { AllocationKey, AllocationSlice } from "@/server/queries/hub";
 
@@ -70,7 +71,7 @@ export function AllocationDonut({ slices, totalCad }: AllocationDonutProps) {
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
           <span className="text-caption text-muted-foreground">Total</span>
-          <span className="font-display text-body font-semibold tabular-nums">{formatMoney(totalCad)}</span>
+          <span className="font-display text-body font-semibold tabular-nums"><Money value={totalCad} /></span>
         </div>
       </div>
 
@@ -107,7 +108,7 @@ export function AllocationDonut({ slices, totalCad }: AllocationDonutProps) {
                   <span className="truncate">{s.label}</span>
                 </span>
               </th>
-              <td className="py-1 pr-2 text-right font-mono">{formatMoney(s.valueCad)}</td>
+              <td className="py-1 pr-2 text-right font-mono"><Money value={s.valueCad} /></td>
               <td className="py-1 text-right font-mono text-muted-foreground">{shareText(s.share)}</td>
             </tr>
           ))}

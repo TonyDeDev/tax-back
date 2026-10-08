@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   directionOf,
   formatAgo,
+  MASKED_MONEY,
   formatCompactMoney,
   formatDate,
   formatMoney,
@@ -16,6 +17,24 @@ describe("format", () => {
     expect(formatMoney("100", "CAD", { signed: true })).toContain("+");
     expect(formatMoney(-100, "CAD", { signed: true })).toMatch(/^[-−]/);
     expect(formatMoney(0, "CAD", { signed: true })).not.toMatch(/[+\-−]/);
+  });
+
+  /*
+   * "Hide amounts" masks at the formatter, so no call site can forget. The sign goes with the figure:
+   * a bare "+" would still say a position is up, which is most of what a shoulder-surfer wants.
+   */
+  it("masks money while amounts are hidden, sign included", () => {
+    expect(formatMoney(1234.5, "CAD", { hidden: true })).toBe(MASKED_MONEY);
+    expect(formatMoney("100", "CAD", { signed: true, hidden: true })).toBe(MASKED_MONEY);
+    expect(formatMoney(-100, "CAD", { signed: true, hidden: true })).not.toMatch(/[0-9+\-−]/);
+    expect(formatCompactMoney(1_250_000, "CAD", { hidden: true })).toBe(MASKED_MONEY);
+    // A currency other than CAD must not leak the amount either.
+    expect(formatMoney(99.99, "USD", { hidden: true })).toBe(MASKED_MONEY);
+  });
+
+  it("formats normally when amounts are not hidden", () => {
+    expect(formatMoney(1234.5, "CAD", { hidden: false })).toMatch(/1,234\.50/);
+    expect(formatCompactMoney(1_250_000)).toMatch(/1\.3|1\.2/);
   });
 
   it("formats quantity, percent, and dates", () => {

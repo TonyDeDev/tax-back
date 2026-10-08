@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { HideAmountsToggle } from "@/components/amounts";
 import { type ShellUser, UserMenu } from "@/components/auth/user-menu";
 import { Brand } from "@/components/brand";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -40,6 +41,7 @@ export function Sidebar({ user }: { user: ShellUser }) {
         <UserMenu user={user} className="px-2" />
         <div className="flex items-center justify-between px-2">
           <span className="text-caption text-muted-foreground">Theme</span>
+          <HideAmountsToggle />
           <ThemeToggle />
         </div>
       </div>
