@@ -11,7 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
-import { formatDate, formatMoney, formatPercent, formatQuantity } from "@/lib/format";
+import { formatDate, formatPercent, formatQuantity } from "@/lib/format";
 import { DIVIDEND_CLASS_LABELS, GAIN_KIND_LABELS } from "@/lib/tax-csv";
 import { cn } from "@/lib/utils";
 import { requireUser } from "@/server/auth/session";
@@ -147,7 +147,7 @@ function FillOutReturn({ view }: { view: TaxYearView }) {
       </ul>
       {r.netCapitalLossCad && (
         <p className="text-body-sm text-muted-foreground">
-          You have a net capital loss of {formatMoney(r.netCapitalLossCad)} for {view.year}. It does not go on line 12700: you can apply it against
+          You have a net capital loss of <Money value={r.netCapitalLossCad} /> for {view.year}. It does not go on line 12700: you can apply it against
           taxable capital gains of the past 3 years (Form T1A) or carry it forward to future years (line 25300).
         </p>
       )}
