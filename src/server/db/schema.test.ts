@@ -362,6 +362,9 @@ describe("delete my data", () => {
       "user_profiles", "connections", "brokerage_accounts", "transactions", "holdings",
       "account_balances", "manual_adjustments", "sync_runs", "acb_positions", "acb_events", "realized_gains",
       "superficial_losses", "income_events", "harvest_opportunities", "tax_year_summaries", "tax_warnings",
+      "contribution_flows", "contribution_inputs", "contribution_flow_results", "contribution_summaries",
+      "account_value_snapshots", "position_reconciliations", "corporate_actions", "security_preferences",
+      "accounts", "sessions",
     ];
     for (const table of owned) {
       const { rows } = await client.query<{ n: number }>(`SELECT count(*)::int AS n FROM ${table} WHERE user_id = $1`, [A]);

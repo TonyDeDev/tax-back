@@ -15,6 +15,7 @@ import { Money } from "@/components/money";
 import { StatusDot, type StatusTone } from "@/components/status-dot";
 import { FirstSync } from "@/components/sync/first-sync";
 import { SyncControls } from "@/components/sync/sync-controls";
+import { NewConnectionHint, SyncTimingHint } from "@/components/sync/sync-hints";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ACCOUNT_TYPE_LABELS } from "@/lib/account-types";
@@ -203,6 +204,7 @@ function BrokerageSection({ brokerage: b, totalCad, readOnly }: { brokerage: Hub
           <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
             <StatusDot tone={broken ? "negative" : "positive"} />
             {broken ? "Needs reconnect" : "Synced"}
+            {!broken && !readOnly && <SyncTimingHint align="start" />}
           </span>
         </div>
         <div className="flex items-center gap-3">
@@ -251,6 +253,7 @@ function PendingBrokerageSection({ brokerage: b }: { brokerage: HubPendingBroker
           <span className="flex items-center gap-1.5 text-caption text-muted-foreground">
             <StatusDot tone={broken ? "negative" : "neutral"} pulse={!broken} />
             {broken ? "Needs reconnect" : "Waiting for accounts"}
+            {!broken && <NewConnectionHint align="start" />}
           </span>
         </div>
         <a
@@ -345,7 +348,13 @@ export default async function Hub(props: PageProps<"/hub">) {
     <HubHeader
       actions={
         <>
-          <SyncControls status={sync.status} tone={sync.tone} running={sync.running} disabledReason={sync.disabledReason}>
+          <SyncControls
+            status={sync.status}
+            tone={sync.tone}
+            running={sync.running}
+            disabledReason={sync.disabledReason}
+            timingHint={!user.isDemo}
+          >
             {summary && <BrokerageFilter brokerages={summary.brokerages} selected={selected?.id ?? null} />}
           </SyncControls>
           <ConnectCta isDemo={user.isDemo} />

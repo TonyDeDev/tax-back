@@ -2,8 +2,12 @@ import { D, ZERO, type Dec } from "./decimal";
 import { isRegistered } from "./registered";
 import type { BrokerPosition, LedgerEntry, Reconciliation, ReconciliationRow, ReconciliationStatus } from "./types";
 
-/** Brokers round fractional shares; anything closer than this is the same position. */
-const TOLERANCE = new D("0.000001");
+/**
+ * Brokers report fractional shares to 4 decimal places (Wealthsimple truncates), while the ledger adds up
+ * every trade's own 4-decimal quantity, so the two can differ by a unit in the last place. Anything this
+ * close is the same position: a real trade of 0.0001 shares is worth cents at most.
+ */
+export const RECONCILE_TOLERANCE = new D("0.0001");
 
 interface Tally {
   symbol: string;
@@ -12,7 +16,7 @@ interface Tally {
 
 function statusOf(ledger: Dec, broker: Dec): ReconciliationStatus {
   const gap = broker.minus(ledger);
-  if (gap.abs().lte(TOLERANCE)) return "match";
+  if (gap.abs().lte(RECONCILE_TOLERANCE)) return "match";
   return gap.gt(0) ? "broker_has_more" : "ledger_has_more";
 }
 

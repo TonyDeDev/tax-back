@@ -2,9 +2,15 @@
 
 import { eq } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 import { z } from "zod";
+import { DELETE_CONFIRMATION } from "@/lib/delete-data";
+import { RevokeFailedError, deleteUserData } from "@/server/account-deletion";
+import { getAuth } from "@/server/auth";
 import { ReadOnlyDemoError, UnauthorizedError, requireWritableUser } from "@/server/auth/session";
 import { getDb } from "@/server/db";
+import { getEnv } from "@/server/env";
 import * as s from "@/server/db/schema";
 import { recomputeUser, torontoToday } from "@/server/recompute";
 import { D } from "@/tax-engine";
@@ -43,4 +49,41 @@ export async function setMarginalRate(percent: string): Promise<ActionResult> {
     revalidatePath("/tax", "layout");
   }
   return { ok: true };
+}
+
+/**
+ * "Delete my data": revoke TaxBack's SnapTrade access, sign out, then delete the user and everything
+ * they own. On success it redirects to the landing page, so it only returns on failure.
+ */
+export async function deleteMyData(confirmation: string): Promise<ActionResult> {
+  let user: { id: string };
+  try {
+    user = await requireWritableUser();
+  } catch (error) {
+    if (error instanceof ReadOnlyDemoError || error instanceof UnauthorizedError) return { ok: false, message: error.message };
+    throw error;
+  }
+  if (confirmation.trim() !== DELETE_CONFIRMATION) return { ok: false, message: `Type ${DELETE_CONFIRMATION} to confirm.` };
+
+  const env = getEnv();
+  const credentials =
+    env.SNAPTRADE_OAUTH_CLIENT_ID && env.SNAPTRADE_OAUTH_CLIENT_SECRET
+      ? { clientId: env.SNAPTRADE_OAUTH_CLIENT_ID, clientSecret: env.SNAPTRADE_OAUTH_CLIENT_SECRET }
+      : null;
+  const auth = getAuth();
+  const requestHeaders = await headers();
+  try {
+    // Revocation runs first inside deleteUserData; signing out before the delete clears the session cookie.
+    await deleteUserData(getDb(), auth, user.id, credentials, fetch, async () => {
+      await auth.api.signOut({ headers: requestHeaders }).catch(() => undefined);
+    });
+  } catch (error) {
+    if (error instanceof RevokeFailedError) {
+      console.error(`[delete] user ${user.id} revoke failed`, error.cause);
+      return { ok: false, message: error.message };
+    }
+    console.error(`[delete] user ${user.id} failed`, error);
+    return { ok: false, message: "Your data could not be deleted. Nothing was removed. Try again." };
+  }
+  redirect("/?deleted=1");
 }

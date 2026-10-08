@@ -280,6 +280,23 @@ describe("reconciliation against the broker", () => {
     expect(r.reconciliation).toMatchObject({ matched: 2, total: 2 });
   });
 
+  it("treats a last-decimal rounding difference from the broker as a match, but not a real fractional gap", () => {
+    const r = computeTax({
+      ledger: [
+        entry({ kind: "buy", date: "2025-01-02", qty: 4.5865, price: 100, account: "t", type: "tfsa", security: "VFV" }),
+        entry({ kind: "buy", date: "2025-02-03", qty: 4.5865, price: 100, account: "t", type: "tfsa", security: "VFV" }),
+        entry({ kind: "buy", date: "2025-01-02", qty: 1.25, price: 10, account: "t", type: "tfsa", security: "TQQQ" }),
+      ],
+      fx: flatFx(),
+      asOfDate: "2025-12-31",
+      brokerPositions: [broker("t", "VFV", 9.1729, "tfsa"), broker("t", "TQQQ", 1.2496, "tfsa")],
+    });
+    expect(r.reconciliation.rows.map((x) => [x.securityId, x.status])).toEqual([
+      ["TQQQ", "ledger_has_more"],
+      ["VFV", "match"],
+    ]);
+  });
+
   it("flags shares that arrived with no history and shares that vanished, mismatches first", () => {
     const r = computeTax({
       ledger: [

@@ -4,10 +4,12 @@ import { CheckCircle2, ExternalLink, Link2 } from "lucide-react";
 import { ConnectSnapTradeButton } from "@/components/auth/connect-snaptrade-button";
 import { EmptyState } from "@/components/empty-state";
 import { MarginalRateForm } from "@/components/settings/marginal-rate-form";
+import { DeleteData } from "@/components/settings/delete-data";
+import { NewConnectionHint } from "@/components/sync/sync-hints";
 import { FirstSync } from "@/components/sync/first-sync";
 import { PageHeader } from "@/components/page-header";
 import { ThemeToggle } from "@/components/theme-toggle";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatAgo } from "@/lib/format";
 import { hasSnapTradeGrant } from "@/server/auth/accounts";
@@ -110,6 +112,7 @@ export default async function Settings(props: PageProps<"/settings">) {
             <p role="status" className="flex items-center gap-2 rounded-md border px-3 py-2 text-body-sm">
               <CheckCircle2 aria-hidden className="size-4 shrink-0 text-positive" />
               SnapTrade is connected.
+              <NewConnectionHint align="start" />
             </p>
           )}
           {user.isDemo ? (
@@ -146,10 +149,8 @@ export default async function Settings(props: PageProps<"/settings">) {
           <CardTitle>Delete my data</CardTitle>
           <CardDescription>Removes your connections, transactions, and tax results for good.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <Button variant="destructive" size="sm" disabled>
-            Delete my data
-          </Button>
+        <CardContent className="flex flex-col">
+          <DeleteData disabledReason={user.isDemo ? "The demo is shared by every visitor, so it cannot be deleted." : undefined} />
         </CardContent>
       </Card>
     </>

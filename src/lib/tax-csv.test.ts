@@ -31,6 +31,12 @@ describe("toCsv", () => {
     expect(toCsv([[" padded "]])).toBe('" padded "\r\n');
   });
 
+  it("defuses a cell a spreadsheet would run as a formula, but keeps signed numbers as numbers", () => {
+    expect(toCsv([["=HYPERLINK(\"x\")", "@SUM(A1)", "+1+1", "-cmd", "-12.34", "+5", "-0.5%"]])).toBe(
+      `"'=HYPERLINK(""x"")",'@SUM(A1),'+1+1,'-cmd,-12.34,+5,-0.5%\r\n`,
+    );
+  });
+
   it("writes an empty cell for null and undefined, and yes or no for a flag", () => {
     expect(toCsv([[null, undefined, true, false, 0]])).toBe(",,yes,no,0\r\n");
   });

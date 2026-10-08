@@ -26,10 +26,23 @@ export const DIVIDEND_CLASS_LABELS: Record<DividendClass, string> = {
 
 type Cell = string | number | boolean | null | undefined;
 
-/** RFC 4180: quote a cell that holds a comma, a quote, a newline, or edge whitespace, and double its quotes. */
+/**
+ * Text that a spreadsheet would run as a formula: it starts with =, +, -, @, a tab or a carriage return.
+ * Security names and descriptions come from brokerages, so one named "=HYPERLINK(...)" must not execute
+ * when the export is opened in Excel. A plain number such as "-12.34" stays a number.
+ */
+function isFormula(text: string): boolean {
+  return /^[=+\-@\t\r]/.test(text) && !/^[+-]?\d+(\.\d+)?%?$/.test(text);
+}
+
+/**
+ * RFC 4180: quote a cell that holds a comma, a quote, a newline, or edge whitespace, and double its
+ * quotes. A formula-like cell gets a leading apostrophe (OWASP CSV injection), so it shows as text.
+ */
 function cell(value: Cell): string {
   if (value === null || value === undefined) return "";
-  const text = typeof value === "boolean" ? (value ? "yes" : "no") : String(value);
+  const raw = typeof value === "boolean" ? (value ? "yes" : "no") : String(value);
+  const text = isFormula(raw) ? `'${raw}` : raw;
   return /[",\r\n]/.test(text) || text.trim() !== text ? `"${text.replaceAll('"', '""')}"` : text;
 }
 

@@ -49,7 +49,7 @@ export function DisclaimerStrip() {
   return (
     <aside
       aria-label="Disclaimer"
-      className="fixed inset-x-0 bottom-(--strip-bottom) z-30 flex h-(--disclaimer-h) animate-strip-in items-center border-t border-highlight-border bg-background"
+      className="fixed right-0 bottom-(--strip-bottom) left-(--strip-left) z-30 flex h-(--disclaimer-h) animate-strip-in items-center border-t border-highlight-border bg-background"
     >
       <div className="mx-auto flex w-full max-w-6xl items-center justify-between gap-4 px-4 md:px-8">
         <p className="truncate text-caption text-muted-foreground">Concept demo - not tax advice</p>

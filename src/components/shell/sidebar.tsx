@@ -13,7 +13,7 @@ import { NAV_ITEMS, isActive } from "./nav-items";
 export function Sidebar({ user }: { user: ShellUser }) {
   const pathname = usePathname();
   return (
-    <aside className="sticky top-0 hidden h-[calc(100dvh-var(--strip-space))] w-60 shrink-0 flex-col justify-between border-r bg-card p-4 lg:flex">
+    <aside data-sidebar className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col justify-between border-r bg-card p-4 lg:flex">
       <div className="flex flex-col gap-6">
         <Brand className="px-2 pt-2" />
         <nav aria-label="Main" data-indicator-group className="isolate flex flex-col gap-1">

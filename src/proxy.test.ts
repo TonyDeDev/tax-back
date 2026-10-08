@@ -28,6 +28,7 @@ describe("proxy", () => {
     expect(isProtected("/hub")).toBe(true);
     expect(isProtected("/hub/securities/x")).toBe(true);
     expect(isProtected("/settings")).toBe(true);
+    expect(isProtected("/contributions/2025")).toBe(true);
     expect(isProtected("/hubris")).toBe(false);
     expect(isProtected("/")).toBe(false);
   });

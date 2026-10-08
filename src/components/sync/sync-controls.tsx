@@ -4,6 +4,7 @@ import { RefreshCw } from "lucide-react";
 import { type ReactNode, useId, useState, useTransition } from "react";
 import { refreshNow } from "@/app/(app)/hub/actions";
 import { StatusDot, type StatusTone } from "@/components/status-dot";
+import { SyncTimingHint } from "@/components/sync/sync-hints";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
@@ -15,12 +16,14 @@ interface SyncControlsProps {
   running?: boolean;
   /** Why Refresh is unavailable right now (the 15-minute cooldown or a running sync), or null. Omit to hide Refresh. */
   disabledReason?: string | null;
+  /** Explain beside the status that SnapTrade data can lag. Off for the demo, which never syncs. */
+  timingHint?: boolean;
   /** Controls placed between the status and Refresh, such as the brokerage filter. */
   children?: ReactNode;
 }
 
 /** Sync state for the page header: a status dot and label, and the Refresh button when there is one. */
-export function SyncControls({ status, tone, running = false, disabledReason, children }: SyncControlsProps) {
+export function SyncControls({ status, tone, running = false, disabledReason, timingHint = false, children }: SyncControlsProps) {
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
   const reasonId = useId();
@@ -40,6 +43,7 @@ export function SyncControls({ status, tone, running = false, disabledReason, ch
           <StatusDot tone={syncing ? "neutral" : error ? "negative" : tone} pulse={syncing} />
           {pending ? "Syncing..." : status}
         </span>
+        {timingHint && <SyncTimingHint align="end" />}
         {children}
         {disabledReason !== undefined && (
           <>

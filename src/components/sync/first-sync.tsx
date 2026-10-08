@@ -4,6 +4,7 @@ import { Loader2, RefreshCw } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { firstSync } from "@/app/(app)/hub/actions";
 import { Button } from "@/components/ui/button";
+import { NewConnectionHint } from "./sync-hints";
 
 /**
  * Starts the first read right after SnapTrade access is granted, so the slow work stays out of the
@@ -45,7 +46,10 @@ export function FirstSync() {
       <Loader2 aria-hidden className="size-4 shrink-0 animate-spin text-muted-foreground" />
       <div className="flex flex-col">
         <p className="text-body-sm font-medium">Reading your brokerages from SnapTrade</p>
-        <p className="text-caption text-muted-foreground">This takes up to a minute the first time.</p>
+        <p className="flex items-center gap-1 text-caption text-muted-foreground">
+          This takes up to a minute. Some brokerages keep sending history for up to a day.
+          <NewConnectionHint align="start" />
+        </p>
       </div>
     </div>
   );

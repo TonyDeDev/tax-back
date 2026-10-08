@@ -104,6 +104,7 @@ details[open] > :not(summary) {
  */
 :root {
   --strip-bottom: 0px;
+  --strip-left: 0px;
   --strip-space: 0px;
 }
 body[data-disclaimer] {
@@ -113,6 +114,12 @@ body[data-disclaimer] {
 @media (width < 64rem) {
   body:has([data-bottom-nav]) {
     --strip-bottom: var(--bottom-nav-h);
+  }
+}
+/* On desktop the app sidebar runs full height, and the strip spans only the content beside it. */
+@media (width >= 64rem) {
+  body:has([data-sidebar]) {
+    --strip-left: 15rem;
   }
 }
 

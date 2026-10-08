@@ -10,6 +10,7 @@ import { OpenSourceSection } from "@/components/landing/open-source-section";
 import { ContactRow, TeamCard } from "@/components/landing/team-card";
 import { REPO_PATH, REPO_URL, linkRows, team } from "@/components/landing/team";
 import { Reveal } from "@/components/motion/reveal";
+import { StatusDot } from "@/components/status-dot";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Tag } from "@/components/ui/tag";
@@ -269,11 +270,19 @@ function Contact() {
   );
 }
 
-export default function Landing() {
+export default async function Landing({ searchParams }: PageProps<"/">) {
+  // Set by "Delete my data" in Settings, which signs the user out and lands here.
+  const deleted = (await searchParams).deleted === "1";
   return (
     <div className="flex flex-1 flex-col">
       <Header />
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col px-4 py-12 md:px-8 md:py-16">
+        {deleted && (
+          <p role="status" className="mb-8 flex items-center gap-2 rounded-md border px-4 py-3 text-body-sm">
+            <StatusDot tone="positive" />
+            Your TaxBack data was deleted and its SnapTrade access was revoked.
+          </p>
+        )}
         <Hero />
         <Rules />
         <Features />

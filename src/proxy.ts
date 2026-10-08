@@ -7,7 +7,7 @@ import { type NextRequest, NextResponse } from "next/server";
  * forged, so every page and action still calls `requireUser()`, which is the real check.
  */
 
-const PROTECTED = ["/hub", "/tax", "/settings"];
+const PROTECTED = ["/hub", "/tax", "/contributions", "/settings"];
 
 export function isProtected(pathname: string): boolean {
   return PROTECTED.some((p) => pathname === p || pathname.startsWith(`${p}/`));

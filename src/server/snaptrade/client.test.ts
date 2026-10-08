@@ -80,7 +80,53 @@ describe("snaptradeClient", () => {
 
   it("never puts the token in an error message", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => json({}, 500)));
-    const error = await snaptradeClient("secret-token").listBalances("acc-1").catch((e: unknown) => e);
+    const error = await snaptradeClient("secret-token", { retryDelaysMs: [] }).listBalances("acc-1").catch((e: unknown) => e);
     expect(String(error)).not.toContain("secret-token");
+  });
+
+  it("retries a rate limit or a server error, then succeeds", async () => {
+    const fetchMock = vi
+      .fn<() => Promise<Response>>()
+      .mockResolvedValueOnce(json({}, 429))
+      .mockResolvedValueOnce(json({}, 503))
+      .mockResolvedValueOnce(json([]));
+    vi.stubGlobal("fetch", fetchMock);
+    expect(await snaptradeClient("t", { retryDelaysMs: [0, 0] }).listAccounts()).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("retries a request that never answered, and gives up with a clear error", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new DOMException("The operation timed out.", "TimeoutError");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const error = await snaptradeClient("t", { retryDelaysMs: [0, 0] }).listAccounts().catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(SnapTradeApiError);
+    expect((error as SnapTradeApiError).status).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("never retries a rejected token or a client error", async () => {
+    const fetchMock = vi.fn(async () => json({}, 401));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(snaptradeClient("t", { retryDelaysMs: [0, 0] }).listAccounts()).rejects.toBeInstanceOf(
+      SnapTradeUnauthorizedError,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not wait out a long Retry-After; the next sync tries again", async () => {
+    const fetchMock = vi.fn(async () => new Response("{}", { status: 429, headers: { "retry-after": "120" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    await expect(snaptradeClient("t", { retryDelaysMs: [0, 0] }).listAccounts()).rejects.toBeInstanceOf(SnapTradeApiError);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails rather than silently dropping history when paging never ends", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => json({ data: [{ id: "a", type: "BUY" }], pagination: { offset: 0, limit: 1000, total: 10_000_000 } })),
+    );
+    await expect(snaptradeClient("t").listAllActivities("acc-1")).rejects.toBeInstanceOf(SnapTradeResponseError);
   });
 });
