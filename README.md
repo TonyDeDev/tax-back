@@ -1,19 +1,22 @@
-# TaxBack
+# Snap Tax Back
 
-TaxBack is a free, working-concept web app that pulls your brokerage accounts into one Hub and shows Canadian tax insight: adjusted cost base (ACB), capital gains, superficial losses, tax-loss harvesting and dividends.
+Snap your tax back.
 
-> **Concept demo - not tax advice.** TaxBack is a demo tool, not a commercial product.
+Snap Tax Back is a free, working-concept web app that pulls your brokerage accounts into one Hub and shows Canadian tax insight: adjusted cost base (ACB), capital gains, superficial losses, tax-loss harvesting and dividends.
+
+> **Concept demo - not tax advice.** Snap Tax Back is a demo tool, not a commercial product.
 
 ## Why it exists
 
-Canadian investors often hold the same stock at more than one brokerage. CRA rules pool the ACB of a security across all non-registered accounts, but each brokerage only sees its own, so the book value on a statement can be wrong. TaxBack combines every account through [SnapTrade](https://snaptrade.com), pools ACB across brokerages, and flags superficial losses, including ones caused by a buy in a TFSA or RRSP.
+Canadian investors often hold the same stock at more than one brokerage. CRA rules pool the ACB of a security across all non-registered accounts, but each brokerage only sees its own, so the book value on a statement can be wrong. Snap Tax Back combines every account through [SnapTrade](https://snaptrade.com), pools ACB across brokerages, and flags superficial losses, including ones caused by a buy in a TFSA or RRSP.
 
 ## What you can do
 
 - **Try the demo:** explore a realistic seeded portfolio with no brokerage connection.
 - **Hub:** total value, YTD gains, estimated tax, alerts, accounts grouped by brokerage, an investments table (pooled or per account) and allocation charts.
-- **Tax Center:** realized gains in a Schedule 3 layout, superficial losses, dividends (eligible, non-eligible, foreign), harvesting suggestions with the 30-day window, and CSV export.
-- **Settings:** theme, connected brokerages, delete my data.
+- **Tax Center:** realized gains in a Schedule 3 layout, Schedule 7 and Schedule 15 lines, superficial losses, dividends (eligible, non-eligible, foreign), harvesting suggestions with the 30-day window, and CSV export.
+- **Contributions:** TFSA, RRSP, and FHSA room and contributions, CRA figures to enter, and deposits and withdrawals to reclassify.
+- **Settings:** theme, connected brokerages (managed in the SnapTrade Dashboard), delete my data.
 
 Canada only. The browser never calculates tax; it only shows results saved by the tax engine.
 
@@ -25,10 +28,10 @@ Next.js (App Router) and TypeScript, Neon Postgres with Drizzle ORM, Better Auth
 
 ### Prerequisites
 
-- Node.js 20 or newer
+- Node.js 22 or newer
 - [pnpm](https://pnpm.io)
 - A free [Neon](https://neon.tech) Postgres database
-- Optional: GitHub and/or Google OAuth apps for sign-in, and a free [SnapTrade](https://snaptrade.com) Build plan account to connect real brokerages. Without these you can still use the demo login.
+- Optional: a Google OAuth app for sign-in, and a free SnapTrade [OAuth app](https://docs.snaptrade.com/docs/oauth-apps) to connect real brokerages. Without these you can still use the demo login. See [docs/setup.md](docs/setup.md) for both.
 
 ### Steps
 
@@ -49,13 +52,12 @@ Next.js (App Router) and TypeScript, Neon Postgres with Drizzle ORM, Better Auth
    | Variable | What it is |
    | --- | --- |
    | `DATABASE_URL` | Neon Postgres connection string |
-   | `BETTER_AUTH_SECRET` | Random secret for sessions (`openssl rand -base64 32`) |
-   | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` | GitHub OAuth app (optional) |
+   | `BETTER_AUTH_SECRET` | At least 32 characters (`openssl rand -base64 32`); signs sessions and encrypts the stored SnapTrade tokens |
+   | `BETTER_AUTH_URL` | The app's public origin (`http://localhost:3000` locally) |
    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` | Google OAuth app (optional) |
-   | `SNAPTRADE_CLIENT_ID`, `SNAPTRADE_CONSUMER_KEY` | SnapTrade credentials (server only, never sent to the browser) |
-   | `ENCRYPTION_KEY` | 32 bytes, base64 (`openssl rand -base64 32`); encrypts SnapTrade user secrets |
-   | `CRON_SECRET` | Protects `/api/cron/sync` |
-   | `DEMO_USER_EMAIL` | Email of the demo account (default `demo@taxback.app`) |
+   | `SNAPTRADE_OAUTH_CLIENT_ID`, `SNAPTRADE_OAUTH_CLIENT_SECRET` | SnapTrade OAuth app (optional, server only, never sent to the browser) |
+   | `CRON_SECRET` | At least 32 characters; protects `/api/cron/sync` |
+   | `DEMO_USER_EMAIL` | Email of the demo account (default `demo@taxback.invalid`) |
 
 3. Create the database tables and the demo user:
 
@@ -98,15 +100,15 @@ src/
   lib/          formatting and client-safe helpers
 ```
 
-See `CLAUDE.md` for the full rules and `DESIGN.md` / `theme.css` for the visual language.
+See [docs/tax-rules.md](docs/tax-rules.md) for every tax rule and its known limits, [docs/schema.md](docs/schema.md) for the data model, and `DESIGN.md` / `theme.css` for the visual language.
 
 ## The team
 
 - [Tony Pham](https://www.linkedin.com/in/tonypham06?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
-- [michael Tonner](https://www.linkedin.com/in/michael-toner-data-driven-process-improvement?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
-- [Phuntso Wangyal](https://www.linkedin.com/in/phuntsho-wangyal?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [Michael Toner](https://www.linkedin.com/in/michael-toner-data-driven-process-improvement?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [Phuntsho Wangyal](https://www.linkedin.com/in/phuntsho-wangyal?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
 
 
 ## Disclaimer
 
-TaxBack is an educational concept demo. Its numbers are not tax, legal or financial advice. Check anything you rely on with a qualified professional or the CRA.
+Snap Tax Back is an educational concept demo. Its numbers are not tax, legal or financial advice. Check anything you rely on with a qualified professional or the CRA.

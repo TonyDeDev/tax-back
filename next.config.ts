@@ -14,7 +14,7 @@ const apiHeaders = [
 ];
 
 const nextConfig: NextConfig = {
-  // Do not let `next dev` write into AGENTS.md; it is maintained by hand.
+  // Do not let `next dev` generate an AGENTS.md.
   agentRules: false,
   // No `x-powered-by: Next.js`: it only tells a scanner what to try.
   poweredByHeader: false,

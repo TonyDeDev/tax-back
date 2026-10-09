@@ -1,7 +1,7 @@
 # Setup
 
 How to configure the environment, Google sign-in, and "Sign in with SnapTrade".
-Read `docs/dev.md` first for the local quick start.
+The local quick start is in the README.
 
 ## Environment Variables
 
