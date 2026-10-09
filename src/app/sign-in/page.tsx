@@ -18,7 +18,7 @@ function errorMessage(code: string | undefined): string | null {
   if (code === "access_denied") return "SnapTrade access was not granted, so you were not signed in.";
   if (code === "email_reserved") return "That email cannot be used to sign in.";
   if (code === "account_not_linked") {
-    return "That email already has a TaxBack account. Sign in the way you did before, then connect SnapTrade in Settings.";
+    return "That email already has a Snap Tax Back account. Sign in the way you did before, then connect SnapTrade in Settings.";
   }
   return "Sign-in did not complete. Try again.";
 }
@@ -42,7 +42,7 @@ export default async function SignIn(props: PageProps<"/sign-in">) {
         <CardHeader>
           <CardTitle>Sign in</CardTitle>
           <CardDescription>
-            TaxBack reads your brokerages through SnapTrade.{" "}
+            Snap Tax Back reads your brokerages through SnapTrade.{" "}
             <a href={SNAPTRADE_DASHBOARD_URL} target="_blank" rel="noopener noreferrer" className="text-link hover:underline">
               SnapTrade accounts are free
             </a>

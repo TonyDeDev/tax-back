@@ -163,7 +163,7 @@ function TfsaCard({ s, view, readOnly }: { s: PlanSummary; view: ContributionsVi
       {s.estimateIncomplete && (
         <Notice tone="muted">
           Estimated from your birth year and the history your brokers share, which starts later than your room does.
-          Contributions TaxBack cannot see would lower it: enter the figure from CRA My Account for an exact number.
+          Contributions Snap Tax Back cannot see would lower it: enter the figure from CRA My Account for an exact number.
         </Notice>
       )}
       <FormSection title="Your CRA figure">
@@ -228,7 +228,7 @@ function RrspCard({ s, view, readOnly }: { s: PlanSummary; view: ContributionsVi
       )}
       {s.roomSource === "unknown" && (
         <Notice tone="muted">
-          Your deduction limit is on your {year - 1} notice of assessment. Without it TaxBack cannot work out the deduction, so
+          Your deduction limit is on your {year - 1} notice of assessment. Without it Snap Tax Back cannot work out the deduction, so
           it is left off your return.
         </Notice>
       )}
@@ -240,7 +240,7 @@ function RrspCard({ s, view, readOnly }: { s: PlanSummary; view: ContributionsVi
           readOnly={readOnly}
           fields={[
             { name: "officialRoom", label: `RRSP deduction limit for ${year}`, hint: `On your ${year - 1} notice of assessment.`, placeholder: "18000" },
-            { name: "unusedCarriedForward", label: "Unused RRSP contributions", hint: "Same notice. Blank uses TaxBack's carry forward.", placeholder: "0" },
+            { name: "unusedCarriedForward", label: "Unused RRSP contributions", hint: "Same notice. Blank uses Snap Tax Back's carry forward.", placeholder: "0" },
             {
               name: "deductionClaimed",
               label: "Deduction to claim",
@@ -311,7 +311,7 @@ function FhsaCard({ s, view, readOnly }: { s: PlanSummary; view: ContributionsVi
           readOnly={readOnly}
           fields={[
             { name: "officialRoom", label: `FHSA participation room for ${year}`, hint: "In CRA My Account. Replaces the estimate.", placeholder: "8000" },
-            { name: "unusedCarriedForward", label: "Unused FHSA contributions", hint: "Same statement. Blank uses TaxBack's carry forward.", placeholder: "0" },
+            { name: "unusedCarriedForward", label: "Unused FHSA contributions", hint: "Same statement. Blank uses Snap Tax Back's carry forward.", placeholder: "0" },
             {
               name: "deductionClaimed",
               label: "Deduction to claim",
@@ -330,7 +330,7 @@ function OtherPlanCard({ s }: { s: PlanSummary }) {
     <Card>
       <CardHeader>
         <CardTitle>{ACCOUNT_TYPE_LABELS[s.plan]}</CardTitle>
-        <CardDescription>TaxBack lists what went in and out; it does not track room for this plan.</CardDescription>
+        <CardDescription>Snap Tax Back lists what went in and out; it does not track room for this plan.</CardDescription>
       </CardHeader>
       <CardContent>
         <dl className="grid grid-cols-2 gap-4">
@@ -419,7 +419,7 @@ export default async function ContributionsYear(props: PageProps<"/contributions
         <CardHeader>
           <CardTitle>Deposits and withdrawals</CardTitle>
           <CardDescription>
-            Cash and shares in and out of your registered accounts that count for {year}. TaxBack reads a deposit as a
+            Cash and shares in and out of your registered accounts that count for {year}. Snap Tax Back reads a deposit as a
             contribution, shares moved in kind at their fair market value, and a transfer between two accounts of the same type
             as neither; change any row it got wrong.
           </CardDescription>
@@ -430,7 +430,7 @@ export default async function ContributionsYear(props: PageProps<"/contributions
           ) : (
             <FlowList flows={view.flows} readOnly={readOnly} />
           )}
-          <FormSection title="Add a contribution TaxBack cannot see">
+          <FormSection title="Add a contribution Snap Tax Back cannot see">
             <AddFlowForm today={today} readOnly={readOnly} />
           </FormSection>
         </CardContent>
@@ -440,7 +440,7 @@ export default async function ContributionsYear(props: PageProps<"/contributions
         <CardHeader>
           <CardTitle>Estimates</CardTitle>
           <CardDescription>
-            Without CRA&apos;s figures, TaxBack estimates TFSA room from the year you turned 18 and FHSA room from the year you
+            Without CRA&apos;s figures, Snap Tax Back estimates TFSA room from the year you turned 18 and FHSA room from the year you
             opened your first FHSA. A CRA figure always wins.
           </CardDescription>
         </CardHeader>

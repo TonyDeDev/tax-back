@@ -39,7 +39,7 @@ const SERVER_ONLY_PATHS = new Set(["/get-access-token", "/refresh-token", "/acco
 export function createAuth(db: AnyDb, env: AuthEnv) {
   const providers = configuredProviders(env);
   return betterAuth({
-    appName: "TaxBack",
+    appName: "Snap Tax Back",
     baseURL: env.BETTER_AUTH_URL,
     secret: env.BETTER_AUTH_SECRET,
     database: drizzleAdapter(db, { provider: "pg", usePlural: true, schema: s }),

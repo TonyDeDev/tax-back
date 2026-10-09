@@ -84,7 +84,7 @@ export function contributionLines({ year, rrsp, fhsa }: ContributionLinesInput):
           l.deductionLimit,
           `RRSP deduction limit for ${year}`,
           rrsp.deductionLimitCad,
-          rrsp.roomSource === "cra" ? "The figure you entered from your notice of assessment." : "Estimated by TaxBack: use the figure on your notice of assessment.",
+          rrsp.roomSource === "cra" ? "The figure you entered from your notice of assessment." : "Estimated by Snap Tax Back: use the figure on your notice of assessment.",
         ),
       );
     }

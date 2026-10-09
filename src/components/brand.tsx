@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils";
 const ARROW = "M17 39.4Q31 35 53 13";
 const ARROW_HEAD = "M42.22 13.56L53 13L52.44 23.78";
 
-/** The TaxBack mark: a tax form with rising bars and an arrow coming back out. Ink follows `currentColor`, the arrow is `primary`. */
+/** The Snap Tax Back mark: a tax form with rising bars and an arrow coming back out. Ink follows `currentColor`, the arrow is `primary`. */
 export function LogoMark({ className }: { className?: string }) {
   const maskId = useId();
   return (
@@ -42,8 +42,8 @@ export function Brand({ className }: { className?: string }) {
       className={cn("flex items-center gap-2 font-display text-subheading font-bold text-foreground", className)}
     >
       <LogoMark className="size-7" />
-      <span>
-        Tax<span className="text-primary">Back</span>
+      <span className="whitespace-nowrap">
+        Snap Tax <span className="text-primary">Back</span>
       </span>
     </Link>
   );

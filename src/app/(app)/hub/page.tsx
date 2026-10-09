@@ -281,7 +281,7 @@ function NotConnected() {
       <div className="flex flex-col gap-2">
         <h2 className="font-display text-heading-sm font-semibold">Connect your first brokerage</h2>
         <p className="text-body-sm text-muted-foreground">
-          TaxBack reads your accounts through SnapTrade, read-only, and pools your cost basis across every brokerage. Connect
+          Snap Tax Back reads your accounts through SnapTrade, read-only, and pools your cost basis across every brokerage. Connect
           your free SnapTrade account to see your Hub.
         </p>
       </div>

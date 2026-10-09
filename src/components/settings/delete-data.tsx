@@ -53,7 +53,7 @@ export function DeleteData({ disabledReason }: { disabledReason?: string }) {
       }}
     >
       <p className="text-body-sm">
-        This revokes TaxBack&apos;s access to SnapTrade, then permanently deletes your accounts, transactions, inputs, and
+        This revokes Snap Tax Back&apos;s access to SnapTrade, then permanently deletes your accounts, transactions, inputs, and
         tax results. It cannot be undone. Your brokerages and your SnapTrade account are not affected.
       </p>
       <label htmlFor={inputId} className="text-caption text-muted-foreground">

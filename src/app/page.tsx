@@ -16,7 +16,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Tag } from "@/components/ui/tag";
 
 export const metadata: Metadata = {
-  title: "TaxBack - All your brokerages, one Canadian tax picture",
+  title: "Snap Tax Back - All your brokerages, one Canadian tax picture",
   description:
     "A free concept demo that pools your adjusted cost base across every brokerage and flags superficial losses and tax-loss harvesting under CRA rules.",
 };
@@ -35,14 +35,14 @@ const FEATURES = [
     label: "The core problem",
     title: "ACB pooled across brokerages",
     icon: Layers,
-    body: "Each broker sees only its own accounts, so none of them knows your real adjusted cost base. TaxBack replays every non-registered account into one pool.",
+    body: "Each broker sees only its own accounts, so none of them knows your real adjusted cost base. Snap Tax Back replays every non-registered account into one pool.",
     spec: "ALL NON-REGISTERED · EVERY BROKERAGE",
   },
   {
     label: "The rule people miss",
     title: "Superficial losses, caught",
     icon: TriangleAlert,
-    body: "Rebuy within 30 days and the loss is denied, even if the rebuy was in your TFSA. TaxBack moves the denied amount onto the replacement shares, or says when it is gone for good.",
+    body: "Rebuy within 30 days and the loss is denied, even if the rebuy was in your TFSA. Snap Tax Back moves the denied amount onto the replacement shares, or says when it is gone for good.",
     spec: "-30D … +30D · TFSA AND RRSP INCLUDED",
   },
   {
@@ -168,11 +168,12 @@ function Hero() {
           <Tag className="self-start">Free concept demo · Canada only</Tag>
           <div className="flex max-w-3xl flex-col gap-4">
             <h1 className="font-display text-heading font-bold md:text-heading-lg xl:text-display">
-              All your brokerages. One Canadian tax picture.
+              Snap your tax back.
             </h1>
             <p className="max-w-xl text-body text-muted-foreground">
-              TaxBack pools your adjusted cost base across every brokerage, catches superficial losses before they
-              cost you, and lays your year out the way Schedule 3 asks for it.
+              All your brokerages, one Canadian tax picture. Snap Tax Back pools your adjusted cost base across every
+              brokerage, catches superficial losses before they cost you, and lays your year out the way Schedule 3 asks
+              for it.
             </p>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start">
@@ -253,7 +254,7 @@ function Contact() {
           <h2 id="contact" className="font-display text-heading-sm font-medium md:text-heading">
             Contact
           </h2>
-          <p className="text-body text-muted-foreground">The people behind TaxBack. Say hello, or read the code.</p>
+          <p className="text-body text-muted-foreground">The people behind Snap Tax Back. Say hello, or read the code.</p>
         </div>
         <ul className="reveal-stagger grid gap-4 [--motion-stagger:60ms] md:grid-cols-3">
           {team.map((member) => (
@@ -277,7 +278,7 @@ export default async function Landing({ searchParams }: PageProps<"/">) {
         {deleted && (
           <p role="status" className="mb-8 flex items-center gap-2 rounded-md border px-4 py-3 text-body-sm">
             <StatusDot tone="positive" />
-            Your TaxBack data was deleted and its SnapTrade access was revoked.
+            Your Snap Tax Back data was deleted and its SnapTrade access was revoked.
           </p>
         )}
         <Hero />
@@ -290,7 +291,9 @@ export default async function Landing({ searchParams }: PageProps<"/">) {
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 px-4 py-8 md:flex-row md:items-start md:justify-between md:px-8">
           <div className="flex flex-col gap-2">
             <Brand />
-            <p className="max-w-md text-caption text-muted-foreground">A free working concept for Canadian investors.</p>
+            <p className="max-w-md text-caption text-muted-foreground">
+              Snap your tax back. A free working concept for Canadian investors.
+            </p>
           </div>
           <div className="flex flex-col gap-2 text-caption text-muted-foreground md:items-end">
             <a

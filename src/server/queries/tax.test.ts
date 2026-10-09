@@ -184,7 +184,7 @@ describe("taxYearCsv over the demo", () => {
     const view = views.get(2026)!;
     const csv = taxYearCsv(view, TODAY);
     const lines = csv.split("\r\n");
-    expect(lines[0]).toBe("TaxBack,Tax year 2026");
+    expect(lines[0]).toBe("Snap Tax Back,Tax year 2026");
     expect(csv).toContain(`Generated,${TODAY}`);
     expect(csv).toContain(`Net capital gain or loss,${new D(view.totals!.netCapitalGainCad).toFixed(2)}`);
 

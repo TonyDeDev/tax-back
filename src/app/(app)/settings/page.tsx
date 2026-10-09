@@ -33,7 +33,7 @@ function connectError(code: string | undefined): string | null {
   // Better Auth's linkSocial conflict path (this flow) redirects with this code; a differently-named
   // one (`account_ownership_conflict`) belongs to the sign-in-time linking path and never reaches here.
   if (code === "account_already_linked_to_different_user") {
-    return "That SnapTrade account is already connected to a different TaxBack account. Sign in with that account instead, or use a different SnapTrade Personal account.";
+    return "That SnapTrade account is already connected to a different Snap Tax Back account. Sign in with that account instead, or use a different SnapTrade Personal account.";
   }
   // The 5-minute state cookie expired, or SnapTrade returned to a different host (localhost vs 127.0.0.1).
   if (code === "state_mismatch" || code === "state_security_mismatch") {
@@ -89,7 +89,7 @@ export default async function Settings(props: PageProps<"/settings">) {
         <CardHeader>
           <CardTitle>Tax estimate</CardTitle>
           <CardDescription>
-            Your combined federal and provincial marginal tax rate. TaxBack multiplies it by your taxable capital gains to
+            Your combined federal and provincial marginal tax rate. Snap Tax Back multiplies it by your taxable capital gains to
             estimate the tax owed. Leave it blank for no estimate.
           </CardDescription>
         </CardHeader>
@@ -102,8 +102,8 @@ export default async function Settings(props: PageProps<"/settings">) {
         <CardHeader>
           <CardTitle>Connected brokerages</CardTitle>
           <CardDescription>
-            TaxBack reads your brokerages through SnapTrade, read-only. You add, repair, or remove brokerages in your
-            SnapTrade account, and TaxBack picks up the change on the next refresh.
+            Snap Tax Back reads your brokerages through SnapTrade, read-only. You add, repair, or remove brokerages in your
+            SnapTrade account, and Snap Tax Back picks up the change on the next refresh.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

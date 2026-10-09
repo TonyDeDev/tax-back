@@ -286,7 +286,7 @@ function returnSection(view: TaxYearView): Cell[][] {
             new D(r.tfsa.penaltyCad).isZero()
               ? r.tfsa.roomSource === "cra"
                 ? "From the room you entered."
-                : "Estimated by TaxBack."
+                : "Estimated by Snap Tax Back."
               : `Over the limit: estimated tax of ${money(r.tfsa.penaltyCad)} at 1% a month (Form RC243).`,
           ],
         ]
@@ -298,7 +298,7 @@ function returnSection(view: TaxYearView): Cell[][] {
 /** `generatedOn` is passed in so the caller owns the clock and tests stay fixed. */
 export function taxYearCsv(view: TaxYearView, generatedOn: string): string {
   return toCsv([
-    ["TaxBack", `Tax year ${view.year}`],
+    ["Snap Tax Back", `Tax year ${view.year}`],
     ["Generated", generatedOn],
     ["Note", "Concept demo, not tax advice. Check every number against your own records before filing."],
     [
@@ -319,4 +319,4 @@ export function taxYearCsv(view: TaxYearView, generatedOn: string): string {
   ]);
 }
 
-export const taxYearCsvFilename = (year: number) => `taxback-${year}.csv`;
+export const taxYearCsvFilename = (year: number) => `snap-tax-back-${year}.csv`;

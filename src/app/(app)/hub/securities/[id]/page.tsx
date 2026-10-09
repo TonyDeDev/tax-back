@@ -308,7 +308,7 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
         <CardHeader>
           <CardTitle>Ledger vs broker</CardTitle>
           <CardDescription>
-            TaxBack replays your history and compares the units it arrives at with what each broker holds today.
+            Snap Tax Back replays your history and compares the units it arrives at with what each broker holds today.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
@@ -316,7 +316,7 @@ export default async function SecurityPage(props: PageProps<"/hub/securities/[id
           {waiting && (
             <p className="text-caption text-muted-foreground">
               This gap appeared on {formatDate(waiting.gapSince!)}. Brokers often count a new trade in their holdings a day or so before they
-              report it as an activity, so TaxBack waits until {formatDate(waitingUntil(waiting.gapSince!))} before asking you about it.
+              report it as an activity, so Snap Tax Back waits until {formatDate(waitingUntil(waiting.gapSince!))} before asking you about it.
             </p>
           )}
           {registeredGaps && (

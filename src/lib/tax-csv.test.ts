@@ -45,7 +45,7 @@ describe("toCsv", () => {
 describe("taxYearCsv", () => {
   it("heads the file with the year, the date, and the not-tax-advice note", () => {
     const csv = taxYearCsv(EMPTY, "2026-10-06");
-    expect(csv.startsWith("TaxBack,Tax year 2025\r\nGenerated,2026-10-06\r\n")).toBe(true);
+    expect(csv.startsWith("Snap Tax Back,Tax year 2025\r\nGenerated,2026-10-06\r\n")).toBe(true);
     expect(csv).toContain("not tax advice");
   });
 
@@ -168,6 +168,6 @@ describe("taxYearCsv", () => {
 
 describe("taxYearCsvFilename", () => {
   it("names the download after the year", () => {
-    expect(taxYearCsvFilename(2025)).toBe("taxback-2025.csv");
+    expect(taxYearCsvFilename(2025)).toBe("snap-tax-back-2025.csv");
   });
 });

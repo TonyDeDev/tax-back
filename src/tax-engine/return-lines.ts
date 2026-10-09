@@ -86,7 +86,7 @@ export function returnLines({ year, gains, totals }: ReturnLinesInput): ReturnLi
     line: T1_LINES.taxableCapitalGains,
     label: "Taxable capital gains",
     amountCad: taxable.isNegative() ? ZERO : taxable,
-    note: "Add capital gains from your T3 and T5 slips (Schedule 3 lines 17400 and 17600), which TaxBack does not see.",
+    note: "Add capital gains from your T3 and T5 slips (Schedule 3 lines 17400 and 17600), which Snap Tax Back does not see.",
   });
 
   if (totals) {
@@ -114,7 +114,7 @@ export function returnLines({ year, gains, totals }: ReturnLinesInput): ReturnLi
         line: T1_LINES.investmentIncome,
         label: "Interest and other investment income: foreign dividends in CAD",
         amountCad: totals.foreignIncomeCad,
-        note: "Before withholding tax. Add any interest income, which TaxBack does not track.",
+        note: "Before withholding tax. Add any interest income, which Snap Tax Back does not track.",
       },
       {
         key: "s1-40425",

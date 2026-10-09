@@ -40,7 +40,7 @@ export function warningMessage(w: WarningView, hidden = false): string {
     case "unsupported_transfer":
       return `${symbol}: a transfer between accounts was found. Refresh to apply the newer transfer rules.`;
     case "transfer_unmatched":
-      return `${symbol}: shares moved to or from an account TaxBack cannot see. Check the position reconciliation and add an opening balance if needed.`;
+      return `${symbol}: shares moved to or from an account Snap Tax Back cannot see. Check the position reconciliation and add an opening balance if needed.`;
     case "transfer_value_missing":
       return `${symbol}: shares crossed between a registered and a non-registered account, but the broker sent no market value, so the transfer was not applied.`;
     case "registered_transfer_loss_denied":

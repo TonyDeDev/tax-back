@@ -9,7 +9,7 @@ import { InfoHint } from "@/components/ui/info-hint";
 export function SyncTimingHint({ align = "center" }: { align?: "start" | "center" | "end" }) {
   return (
     <InfoHint label="About sync timing" tone="warning" align={align}>
-      TaxBack shows what SnapTrade last read from your brokerage. SnapTrade refreshes most brokerages about once a
+      Snap Tax Back shows what SnapTrade last read from your brokerage. SnapTrade refreshes most brokerages about once a
       day, so a trade, dividend, or deposit can take up to a day to appear here, even after you press Refresh.
     </InfoHint>
   );
@@ -20,7 +20,7 @@ export function NewConnectionHint({ align = "center" }: { align?: "start" | "cen
   return (
     <InfoHint label="Why accounts are missing" tone="warning" align={align}>
       A brokerage you just connected can take from a few minutes to a day before SnapTrade has its accounts,
-      holdings, and history. Some brokerages also share only recent history. TaxBack picks up what arrives on the
+      holdings, and history. Some brokerages also share only recent history. Snap Tax Back picks up what arrives on the
       next refresh or the daily sync.
     </InfoHint>
   );

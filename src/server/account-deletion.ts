@@ -13,7 +13,7 @@ const REVOKE_TIMEOUT_MS = 15_000;
 /** SnapTrade could not confirm the grant was revoked, so nothing was deleted. */
 export class RevokeFailedError extends Error {
   constructor(options?: ErrorOptions) {
-    super("SnapTrade could not be reached to revoke TaxBack's access, so nothing was deleted. Try again in a minute.", options);
+    super("SnapTrade could not be reached to revoke Snap Tax Back's access, so nothing was deleted. Try again in a minute.", options);
     this.name = "RevokeFailedError";
   }
 }

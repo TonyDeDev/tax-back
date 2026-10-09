@@ -431,7 +431,7 @@ async function getReturnView(
       ? [
           {
             key: "contribution-review",
-            text: `${contributions.flowsToReview} ${contributions.flowsToReview === 1 ? "cash transfer needs" : "cash transfers need"} a look: TaxBack could not tell whether ${contributions.flowsToReview === 1 ? "it is a contribution" : "they are contributions"}.`,
+            text: `${contributions.flowsToReview} ${contributions.flowsToReview === 1 ? "cash transfer needs" : "cash transfers need"} a look: Snap Tax Back could not tell whether ${contributions.flowsToReview === 1 ? "it is a contribution" : "they are contributions"}.`,
             href: `/contributions/${year}#activity`,
             linkLabel: "Review",
           },

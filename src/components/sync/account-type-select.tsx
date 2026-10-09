@@ -55,7 +55,7 @@ export function AccountTypeSelect({ accountId, accountName, value, confirmed, re
           <Loader2 aria-label="Saving" className="size-4 animate-spin text-muted-foreground" />
         ) : confirmed ? null : (
           // Picking a different type confirms it; this confirms a guess that is already right.
-          <Button variant="outline" size="sm" onClick={() => change(current)} title="TaxBack guessed this type from the broker.">
+          <Button variant="outline" size="sm" onClick={() => change(current)} title="Snap Tax Back guessed this type from the broker.">
             Confirm
           </Button>
         )}
