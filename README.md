@@ -102,10 +102,10 @@ See `CLAUDE.md` for the full rules and `DESIGN.md` / `theme.css` for the visual 
 
 ## The team
 
-| Name | Links |
-| --- | --- |
-| Tony Pham | [GitHub](https://github.com/TonyDeDev) - LinkedIn: _add link_ |
-| Phuntsho Wangyal Galay | LinkedIn: _add link_ |
+- [LinkedIn](https://www.linkedin.com/in/tonypham06?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [LinkedIn](https://www.linkedin.com/in/michael-toner-data-driven-process-improvement?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [LinkedIn](https://www.linkedin.com/in/phuntsho-wangyal?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+
 
 ## Disclaimer
 
