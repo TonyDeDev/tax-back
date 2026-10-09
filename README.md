@@ -102,9 +102,9 @@ See `CLAUDE.md` for the full rules and `DESIGN.md` / `theme.css` for the visual 
 
 ## The team
 
-- [LinkedIn](https://www.linkedin.com/in/tonypham06?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
-- [LinkedIn](https://www.linkedin.com/in/michael-toner-data-driven-process-improvement?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
-- [LinkedIn](https://www.linkedin.com/in/phuntsho-wangyal?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [Tony Pham](https://www.linkedin.com/in/tonypham06?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [michael Tonner](https://www.linkedin.com/in/michael-toner-data-driven-process-improvement?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
+- [Phuntso Wangyal](https://www.linkedin.com/in/phuntsho-wangyal?utm_source=share_via&utm_content=profile&utm_medium=member_ios)
 
 
 ## Disclaimer
