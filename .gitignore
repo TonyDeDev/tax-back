@@ -44,3 +44,8 @@ next-env.d.ts
 # SnapTrade probe output (real brokerage data)
 /.snaptrade-probe/
 .neon
+
+# Personal files kept out of the repo
+/Screenshot*.png
+/*.docx
+/test_report.md
