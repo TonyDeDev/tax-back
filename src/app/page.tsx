@@ -256,9 +256,9 @@ function Contact() {
           </h2>
           <p className="text-body text-muted-foreground">The people behind Snap Tax Back. Say hello, or read the code.</p>
         </div>
-        <ul className="reveal-stagger grid gap-4 [--motion-stagger:60ms] md:grid-cols-3">
+        <ul className="reveal-stagger grid grid-cols-1 gap-4 [--motion-stagger:60ms] md:grid-cols-3">
           {team.map((member) => (
-            <li key={member.name}>
+            <li key={member.name} className="min-w-0">
               <TeamCard member={member} rows={linkRows(member.links)} />
             </li>
           ))}

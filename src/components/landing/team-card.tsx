@@ -51,7 +51,7 @@ export function TeamCard({ member, rows }: { member: TeamMember; rows: LinkRow[]
   return (
     <article
       aria-label={member.name}
-      className="flex h-full flex-col gap-5 rounded-md border bg-card p-6 transition-motion hover:border-highlight-border"
+      className="flex h-full min-w-0 flex-col gap-5 rounded-md border bg-card p-5 md:p-6 transition-motion hover:border-highlight-border"
     >
       <div className="flex items-center gap-4">
         {member.photo && (
